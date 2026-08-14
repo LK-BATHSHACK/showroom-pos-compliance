@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import * as XLSX from "xlsx";
 import { parseAuditExcel, isAuditTemplate, isMultiTabAuditTemplate, parseMultiTabAuditExcel } from "@/lib/parseAuditExcel";
 import { isMsFormsExport, parseMsFormsExcel } from "@/lib/parseMsFormsExcel";
-import { isSpotCheckWorkbook } from "@/lib/parseSpotCheckExcel";
+import { isSpotCheckWorkbook, parseSpotCheckExcel } from "@/lib/parseSpotCheckExcel";
 import { ParsedAudit } from "@/lib/parsedAudit";
 import { loadSharedContext, processAuditSubmission, ProcessedAuditResult } from "@/lib/processAuditSubmission";
 import { createRecords, TABLES } from "@/lib/airtable";
@@ -18,22 +18,21 @@ export async function POST(req: NextRequest) {
 
     const buffer = Buffer.from(await file.arrayBuffer());
 
-    // Two live formats as of the 14 Aug 2026 process change - every
-    // showroom self-reports monthly via the Microsoft Form, and Jordan's
-    // visits are spot checks recorded on the Audit Intake Template.
-    // Detected by workbook shape, not filename.
-    //
-    // The Audit Intake Template itself has two variants (added 21 Aug
-    // 2026): the legacy single-sheet file (any one showroom), and a
-    // multi-tab "round" file - one tab per Group A showroom - so Jordan can
-    // fill in one file for his whole day's round instead of a separate file
-    // per store. Tabs he didn't get to that day are just left blank.
-    //
-    // The multi-showroom "Spot Check workbook" (lib/parseSpotCheckExcel.ts)
-    // is retired from this live path but not deleted - it's still
-    // detectable so an old copy gets a clear message instead of a
-    // confusing failure, and it's one import away from being reinstated
-    // if the process changes again.
+    // Live formats as of 14 Aug 2026 - detected by workbook shape, not
+    // filename:
+    //  1. Audit Intake Template (single sheet named "Audit") - any one
+    //     showroom, for an ad-hoc one-off audit.
+    //  2. Audit Intake Template, multi-tab round variant - one tab per
+    //     Group A showroom, so Jordan can fill in one file for his whole
+    //     day's round instead of a separate file per store.
+    //  3. Microsoft Forms export - every showroom's monthly self-report.
+    //  4. "Showrooms POS Spot Check" workbook (NI/ROI regional tracker,
+    //     lib/parseSpotCheckExcel.ts) - Jordan's actual working file for
+    //     his in-person Group A/B rounds (confirmed 14 Aug 2026 - this is
+    //     NOT the retired format, it's what he really uses month to
+    //     month; an earlier assumption that he'd switched to the Audit
+    //     Intake Template instead was wrong, so this format was
+    //     re-enabled rather than left rejected).
     const wb = XLSX.read(buffer, { type: "buffer", cellDates: true });
     let parsedAudits: ParsedAudit[];
     let format: string;
@@ -53,18 +52,13 @@ export async function POST(req: NextRequest) {
       parsedAudits = parseMsFormsExcel(buffer);
       format = "Microsoft Forms export (Monthly self-report)";
     } else if (isSpotCheckWorkbook(wb)) {
-      return NextResponse.json(
-        {
-          error:
-            'The multi-showroom Spot Check workbook is no longer used - since 14 Aug 2026, Jordan\'s in-person visits use the "Audit Intake Template.xlsx" instead (one per showroom visited).',
-        },
-        { status: 400 }
-      );
+      parsedAudits = parseSpotCheckExcel(buffer);
+      format = "Showrooms POS Spot Check (NI/ROI tracker)";
     } else {
       return NextResponse.json(
         {
           error:
-            'Unrecognised file. This needs to be either the "Audit Intake Template.xlsx" (single showroom - used for Jordan\'s in-person spot checks) or a Microsoft Forms export (every showroom\'s monthly self-report).',
+            'Unrecognised file. This needs to be the "Audit Intake Template.xlsx" (single showroom or multi-tab round), the "Showrooms POS Spot Check" NI/ROI tracker, or a Microsoft Forms export (every showroom\'s monthly self-report).',
         },
         { status: 400 }
       );
@@ -128,7 +122,7 @@ export async function POST(req: NextRequest) {
       const rows = ok
         .map(
           (r) =>
-            `<tr><td style="padding:4px 8px; border-bottom:1px solid #eee;">${r.showroomName}</td><td style="padding:4px 8px; border-bottom:1px solid #eee; color:${ragColor[r.rag]}; font-weight:bold;">${r.rag}</td><td style="padding:4px 8px; border-bottom:1px solid #eee;">${r.score}/100</td><td style="padding:4px 8px; border-bottom:1px solid #eee;">${r.actionsCreated}</td></tr>`
+            `<tr><td style="padding:4px 8px; border-bottom:1px solid #eee;">${r.showroomName}</td><td style="padding:4px 8px; border-bottom:1px solid #eee; color:${ragColor[r.rag]}; font-weight:bold;">${r.rag}</td><td style="padding:4px 8px; border-bottom:1px solid #eee;">${r.score}/100</td><td style="padding:4px 8px; border-bottom:1px solid #eee;">${r.actionsCreated}</td><td style="padding:4px 8px; border-bottom:1px solid #eee;">${r.actionsVerified}</td></tr>`
         )
         .join("");
       const errorRows = allErrors
@@ -141,7 +135,7 @@ export async function POST(req: NextRequest) {
           "New Audit(s) Submitted",
           `<p><strong>Source:</strong> ${format}</p>
            <table style="width:100%; border-collapse:collapse; font-size:14px;">
-             <thead><tr style="text-align:left; color:#6E6E6E;"><th style="padding:4px 8px;">Showroom</th><th style="padding:4px 8px;">RAG</th><th style="padding:4px 8px;">Score</th><th style="padding:4px 8px;">Actions created</th></tr></thead>
+             <thead><tr style="text-align:left; color:#6E6E6E;"><th style="padding:4px 8px;">Showroom</th><th style="padding:4px 8px;">RAG</th><th style="padding:4px 8px;">Score</th><th style="padding:4px 8px;">Actions created</th><th style="padding:4px 8px;">Actions verified fixed</th></tr></thead>
              <tbody>${rows}${errorRows}</tbody>
            </table>
            ${newIdeasLogged ? `<p>${newIdeasLogged} new POS idea${newIdeasLogged === 1 ? "" : "s"} logged for review in POS Requests.</p>` : ""}`
@@ -180,7 +174,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       success: true,
       format,
-      results: ok.map((r) => ({ showroom: r.showroomName, score: r.score, rag: r.rag, actionsCreated: r.actionsCreated, breakdown: r.breakdown })),
+      results: ok.map((r) => ({ showroom: r.showroomName, score: r.score, rag: r.rag, actionsCreated: r.actionsCreated, actionsVerified: r.actionsVerified, breakdown: r.breakdown })),
       errors: allErrors,
       newIdeasLogged,
     });

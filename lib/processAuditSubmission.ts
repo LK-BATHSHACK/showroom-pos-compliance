@@ -22,6 +22,7 @@ export type ProcessedAuditResult =
       rag: "Green" | "Amber" | "Red";
       actionsCreated: number;
       actionsToCreate: Record<string, any>[];
+      actionsVerified: number;
       breakdown: ScoreBreakdown;
     }
   | { ok: false; showroomName: string; sourceLabel?: string; error: string };
@@ -126,6 +127,34 @@ export async function processAuditSubmission(parsed: ParsedAudit, ctx: SharedCon
   }));
   const createdLineItems = parsed.lineItems.length ? await createRecords(TABLES.AUDIT_LINE_ITEMS, lineItemFields) : [];
 
+  // Auto-verify previously-flagged issues: if this audit independently
+  // reports Present-OK for a POS item that had an open/in-progress/resolved
+  // Action against it, that's confirmation the fix actually landed - close
+  // the loop automatically rather than needing a separate manual "verify"
+  // step. This is the answer to "if the designer ticks an item resolved,
+  // does next month's audit reflect that" - ticking "Resolved" alone does
+  // NOT do this (that only records that someone believes it's fixed); it's
+  // this audit's own independent finding of Present-OK that flips the
+  // Action to Verified-Closed, which is what then counts toward the
+  // priorActionResolution score component on the audit AFTER this one.
+  // Deliberately not letting a self-marked "Resolved" alone count, so scores
+  // can't be inflated without an independent check.
+  const showroomActions = await listRecords<{ Status: string; POSItem?: string[]; DateCompleted?: string }>(TABLES.ACTIONS, {
+    filterByFormula: `SEARCH("${esc(showroom.fields.ShowroomName)}", ARRAYJOIN({Showroom})) > 0`,
+  });
+  const toVerify = parsed.lineItems
+    .filter((li) => li.conditionStatus === "Present-OK" && ctx.catalogueIdByName[li.posName])
+    .flatMap((li) => {
+      const posItemId = ctx.catalogueIdByName[li.posName];
+      return showroomActions
+        .filter((a) => a.fields.Status !== "Verified-Closed" && (a.fields.POSItem || []).includes(posItemId))
+        .map((a) => ({
+          id: a.id,
+          fields: { Status: "Verified-Closed", VerifiedAtNextAudit: true, DateCompleted: a.fields.DateCompleted || auditDate },
+        }));
+    });
+  if (toVerify.length) await updateRecords(TABLES.ACTIONS, toVerify);
+
   const actionsToCreate: Record<string, any>[] = [];
   parsed.lineItems.forEach((li, idx) => {
     if (li.conditionStatus === "Present-OK") return;
@@ -170,6 +199,7 @@ export async function processAuditSubmission(parsed: ParsedAudit, ctx: SharedCon
     rag,
     actionsCreated: createdActions.length,
     actionsToCreate,
+    actionsVerified: toVerify.length,
     breakdown: score,
   };
 }

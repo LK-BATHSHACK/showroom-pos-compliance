@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { listRecords, TABLES } from "@/lib/airtable";
-import { KpiCard, RagBadge, Card } from "@/components/ui";
+import { KpiCard, RagBadge, AuditTypeBadge, Card } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
@@ -22,13 +22,28 @@ type ActionFields = {
 };
 
 export default async function DashboardPage() {
-  const [showroomRecords, actionRecords] = await Promise.all([
+  const [showroomRecords, actionRecords, auditRecords] = await Promise.all([
     listRecords<ShowroomFields>(TABLES.SHOWROOMS),
     listRecords<ActionFields>(TABLES.ACTIONS),
+    listRecords<{ Showroom?: string[]; AuditType?: string; AuditDate?: string }>(TABLES.AUDITS, {
+      sort: [{ field: "AuditDate", direction: "desc" }],
+    }),
   ]);
 
   const showrooms = showroomRecords.filter((r) => r.fields.Active !== false);
   const today = new Date().toISOString().slice(0, 10);
+
+  // Most recent audit per showroom, so the table can show which type of
+  // check (Jordan's physical spot check / self-report / remote checklist)
+  // produced the current score - sorted desc above, so the first match per
+  // showroom is the latest.
+  const lastAuditTypeByShowroom: Record<string, string> = {};
+  auditRecords.forEach((a) => {
+    const showroomId = a.fields.Showroom?.[0];
+    if (showroomId && !(showroomId in lastAuditTypeByShowroom)) {
+      lastAuditTypeByShowroom[showroomId] = a.fields.AuditType || "";
+    }
+  });
 
   const scored = showrooms.filter((s) => typeof s.fields.ComplianceScore === "number");
   const avgScore = scored.length
@@ -44,7 +59,7 @@ export default async function DashboardPage() {
 
   const overdue = showrooms.filter((s) => s.fields.NextAuditDue && s.fields.NextAuditDue < today);
 
-  const openActions = actionRecords.filter((a) => a.fields.Status === "Open" || a.fields.Status === "In Progress");
+  const openActions = actionRecords.filter((a) => a.fields.Status === "Open" || a.fields.Status === "In progress");
   const criticalHighOpen = openActions.filter((a) => a.fields.Priority === "Critical" || a.fields.Priority === "High").length;
 
   return (
@@ -71,6 +86,7 @@ export default async function DashboardPage() {
               <th>Group</th>
               <th>RAG</th>
               <th>Score</th>
+              <th>Last audit type</th>
               <th>Last audit</th>
               <th>Next due</th>
             </tr>
@@ -91,6 +107,7 @@ export default async function DashboardPage() {
                     <td>{s.fields.AuditGroup}</td>
                     <td><RagBadge rag={s.fields.RAGStatus} /></td>
                     <td>{s.fields.ComplianceScore ?? "-"}</td>
+                    <td>{lastAuditTypeByShowroom[s.id] ? <AuditTypeBadge auditType={lastAuditTypeByShowroom[s.id]} /> : "-"}</td>
                     <td>{s.fields.LastAuditDate || "-"}</td>
                     <td style={{ color: isOverdue ? "#d03b3b" : undefined, fontWeight: isOverdue ? 600 : 400 }}>
                       {s.fields.NextAuditDue || "-"} {isOverdue ? "(overdue)" : ""}

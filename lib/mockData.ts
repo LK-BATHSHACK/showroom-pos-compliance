@@ -135,7 +135,7 @@ const actions: Rec[] = [
       OwnerEmail: "marcus.webb@bathshack.com",
       DateIdentified: "2026-07-15",
       TargetCompletionDate: "2026-08-05",
-      Status: "In Progress",
+      Status: "In progress",
     },
   },
   {

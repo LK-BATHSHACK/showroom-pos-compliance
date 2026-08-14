@@ -43,7 +43,7 @@ export async function GET(req: NextRequest) {
 
   const overdue = showrooms.filter((s) => s.fields.NextAuditDue && s.fields.NextAuditDue < today);
 
-  const openActions = actionRecords.filter((a: any) => a.fields.Status === "Open" || a.fields.Status === "In Progress");
+  const openActions = actionRecords.filter((a: any) => a.fields.Status === "Open" || a.fields.Status === "In progress");
   const priorityOrder = ["Critical", "High", "Medium", "Low"];
   const openByPriority: Record<string, number> = { Critical: 0, High: 0, Medium: 0, Low: 0 };
   openActions.forEach((a: any) => {

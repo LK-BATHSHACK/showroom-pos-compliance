@@ -39,6 +39,37 @@ export function PriorityBadge({ priority }: { priority?: string }) {
   );
 }
 
+// Distinguishes Jordan's in-person spot checks from showrooms' own monthly
+// self-reports (and the older remote-checklist type) at a glance - added
+// 14 Aug 2026 because the Overview table and Actions Tracker were showing
+// one blended number/list with no visible tag for which check produced it,
+// even though every Audit record has always carried this on AuditType.
+const AUDIT_TYPE_STYLE: Record<string, { label: string; bg: string; fg: string }> = {
+  "Physical (Group A)": { label: "Physical spot check", bg: "#FFE6F3", fg: "#B0005F" },
+  "Remote (Group B)": { label: "Remote checklist", bg: "#E8EEFF", fg: "#3348B0" },
+  "Self-Reported (Monthly)": { label: "Self-reported", bg: "#EFEFEF", fg: "#555" },
+};
+
+export function AuditTypeBadge({ auditType }: { auditType?: string }) {
+  const style = (auditType && AUDIT_TYPE_STYLE[auditType]) || { label: auditType || "-", bg: "#EFEFEF", fg: "#999" };
+  return (
+    <span
+      style={{
+        display: "inline-block",
+        background: style.bg,
+        color: style.fg,
+        fontSize: 11,
+        fontWeight: 600,
+        padding: "2px 8px",
+        borderRadius: 999,
+        whiteSpace: "nowrap",
+      }}
+    >
+      {style.label}
+    </span>
+  );
+}
+
 export function KpiCard({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
   return (
     <div style={{ background: "#fff", borderRadius: 10, padding: "18px 20px", boxShadow: "0 1px 3px rgba(0,0,0,0.06)", flex: 1, minWidth: 160 }}>

@@ -83,6 +83,7 @@ export default function UploadPage() {
                     <th>Score</th>
                     <th>RAG</th>
                     <th>Actions created</th>
+                    <th>Verified fixed</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -92,6 +93,7 @@ export default function UploadPage() {
                       <td>{r.score}/100</td>
                       <td>{r.rag}</td>
                       <td>{r.actionsCreated}</td>
+                      <td>{r.actionsVerified}</td>
                     </tr>
                   ))}
                 </tbody>

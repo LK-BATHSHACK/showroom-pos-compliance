@@ -19,39 +19,61 @@ data store, Resend for email, all secrets in environment variables.
 ## Audit upload formats
 
 **Process as of 14 Aug 2026**: every showroom self-reports monthly via the
-Microsoft Form; Jordan's in-person visits are spot checks recorded on the
-Audit Intake Template (not a full separate audit). The upload page
+Microsoft Form; Jordan's in-person visits are spot checks. The upload page
 auto-detects which format a file is by sheet shape, not filename:
 
-1. **Audit Intake Template.xlsx** - single showroom, any store, picked from
+1. **Showrooms POS Spot Check (NI/ROI tracker)** - `lib/parseSpotCheckExcel.ts`.
+   **This is Jordan's real, live working file** (confirmed 14 Aug 2026) -
+   one tab per region (`NI - <month>`, `ROI - <month>`), showrooms as
+   columns, POS items as rows, values default to the "Example / correct
+   allocation" column and Jordan overwrites only the cells where reality
+   differs. An earlier assumption that he'd moved to the Audit Intake
+   Template instead was wrong - this format had been switched off in the
+   upload route (see git history) and was re-enabled once that was
+   clarified.
+   - **Known gap - showroom name mismatch**: the NI tab's "Belfast" and
+     "Tileshack Huttons" columns don't match any name in the live Airtable
+     Showrooms table (13 rows, none named either of those) - any data
+     entered under them will come back as a per-showroom error
+     ("Showroom ... wasn't found in Airtable") rather than being silently
+     dropped, but it needs resolving with Jordan/Lorraine: are these old
+     names for two of the 13 existing showrooms, or genuinely missing
+     showroom rows?
+   - **Known gap - coverage**: Shore Rd., Dargan, and Lurgan are tagged
+     `AuditGroup = Group A` in Airtable but don't appear as columns in
+     either tracker tab at all - worth confirming whether Jordan's real
+     round actually covers them (under a different name?) or whether
+     they're being missed by this tracker entirely.
+   - **Important operational caveat**: this format has no per-showroom
+     "visited" signal - a showroom Jordan hasn't gotten to yet this month
+     looks IDENTICAL to one he's checked and found fully compliant, because
+     both cases leave every cell matching the reference column untouched.
+     `inferConditionStatus` (in `lib/parsedAudit.ts`) can't tell the
+     difference. **Only upload this file after Jordan has completed the
+     full round for the month** - uploading a partially-completed or
+     not-yet-started copy will record every untouched showroom as 100%
+     compliant, not skip it. (Confirmed by testing against a real uploaded
+     copy: an unstarted August tracker parsed as 11 fully-compliant
+     showrooms with no errors, because "not yet checked" and "checked, all
+     good" are textually indistinguishable in this format.)
+2. **Audit Intake Template.xlsx** - single showroom, any store, picked from
    a dropdown (`lib/parseAuditExcel.ts`, sheet named "Audit"). Kept for any
    ad-hoc one-off audit outside Jordan's regular round.
-2. **Jordan Spot Check Round - Group A.xlsx** (added 21 Aug 2026) - the
-   same layout, but one tab per Group A showroom (Boucher, Shore Rd.,
-   Dargan, Antrim, Lisburn, Lurgan, Ballymena) in a single file, since
-   Jordan visits all of them in one day. Each tab's showroom name is
-   pre-filled so there's no dropdown to get wrong. Tabs he doesn't get to
-   that day are just left blank - the parser skips them rather than erroring,
-   detected by whether any Condition Status cell in that tab was touched.
-   A tab that's started but missing a required field is reported back as a
-   per-tab error without blocking the other showrooms in the same file.
-   Both template variants share 29 POS items (see
-   `excel_template/build_template.py`, which now generates both files).
-3. **Microsoft Forms export** - every showroom's monthly self-report
+3. **Jordan Spot Check Round - Group A.xlsx** - the same layout, but one tab
+   per Group A showroom (Boucher, Shore Rd., Dargan, Antrim, Lisburn,
+   Lurgan, Ballymena) in a single file. Built to solve "one file covers my
+   whole day's round" - **now that the NI/ROI tracker above is confirmed as
+   Jordan's real file and already does this, this template may be
+   redundant** - worth confirming with him whether he needs both or just
+   the NI/ROI tracker, so he isn't left juggling two different
+   "everything in one file" options that both claim to do the same job.
+4. **Microsoft Forms export** - every showroom's monthly self-report
    (`lib/parseMsFormsExcel.ts`) - one row per response, matched by column
    headers rather than position. Two mappings are best-guesses worth Jordan
    double-checking: "Duck Sale Wobblers" -> Duck Stickers (General), and
    "A3 Sale Posters & Displays" -> Monthly Sale Posters (A3) - both overlap
    a near-duplicate catalogue item name. The "not on this list" and "other
    support" free-text questions auto-create a POS Request if answered.
-
-**Retired**: the multi-showroom Spot Check workbook
-(`lib/parseSpotCheckExcel.ts`) - code is still there but no longer wired
-into the upload route, since Jordan's role changed from full audits to spot
-checks. Uploading one now gives a clear "no longer used" message rather
-than failing confusingly. (Its multi-showroom convenience lives on in the
-new Jordan Spot Check Round file above, just in the Audit Intake layout
-rather than the old Spot Check workbook's format.)
 
 Any batch upload (a Microsoft Forms export with multiple responses, or a
 multi-tab round file with multiple filled-in showrooms) sends ONE
@@ -66,6 +88,22 @@ add a missing option automatically where the token's permissions allow it,
 but if it doesn't, the fix is to add the option by hand in Airtable once
 (Field menu -> Edit field -> Add option), the same way as any new POS
 Master Catalogue item.
+
+**Email sending fix (found 12 Aug 2026, live now)**: `lib/resend.ts`'s
+hardcoded "from" address was `notifications@bathshapp.com` - a domain that
+was never added to the Resend account, only `bathshack.com` is Verified
+there. Resend rejects a send from a non-verified domain, and its SDK
+resolves rather than throws on that rejection, so **every single email this
+app tried to send had been failing silently since launch** - no crash, no
+error in the response, nothing in the Resend Emails log, nothing anywhere,
+because the code never checked the `error` field the SDK returned. Fixed by
+(1) changing the "from" address to use `bathshack.com`, and (2)
+`console.error`-logging `result.error` when a send fails, so a future
+problem like this shows up in Vercel's function logs instead of vanishing.
+**Still needs**: a redeploy for this fix to take effect, and adding
+`DESIGNER_NOTIFY_EMAIL` in Vercel (Project Settings -> Environment
+Variables) - it's currently unset on the live project, so designer
+notification emails are silently skipped by design until it's added.
 
 **Airtable follow-up needed**: three POS Master Catalogue items were added
 to the code on 14 Aug 2026 (to match everything the Microsoft Form checks) -
