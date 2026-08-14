@@ -25,6 +25,7 @@ export async function GET(req: NextRequest) {
   const actions = await listRecords<any>(TABLES.ACTIONS);
 
   let auditReminders = 0;
+  let auditDueTodayReminders = 0;
   let auditEscalations = 0;
   let actionEscalations = 0;
 
@@ -32,14 +33,32 @@ export async function GET(req: NextRequest) {
     if (s.fields.Active === false || !s.fields.NextAuditDue) continue;
     const daysUntilDue = daysBetween(s.fields.NextAuditDue, today);
 
-    // Upcoming reminder, fires once on the exact lead-day boundary.
+    // Email one: upcoming heads-up, fires once on the exact lead-day boundary.
     if (daysUntilDue === settings.GroupB_ReminderLeadDays && s.fields.ShowroomManagerEmail) {
       await sendEmail(
         s.fields.ShowroomManagerEmail,
-        `Reminder: POS audit due soon - ${s.fields.ShowroomName}`,
-        emailShell("Audit Reminder", `<p>The next POS audit for <strong>${s.fields.ShowroomName}</strong> is due on <strong>${s.fields.NextAuditDue}</strong>. Please complete the Audit Intake Template and upload it before then.</p>`)
+        `Reminder: your POS review is coming up - ${s.fields.ShowroomName}`,
+        emailShell(
+          "POS Review Reminder",
+          `<p>Your POS review is coming up in ${settings.GroupB_ReminderLeadDays} days.</p>
+           <p style="color:#6E6E6E; font-size:13px;">Showroom: ${s.fields.ShowroomName}<br/>Due: ${s.fields.NextAuditDue}</p>`
+        )
       );
       auditReminders++;
+    }
+
+    // Email two: day-of nudge, fires once exactly on the due date.
+    if (daysUntilDue === 0 && s.fields.ShowroomManagerEmail) {
+      await sendEmail(
+        s.fields.ShowroomManagerEmail,
+        `Today is your POS check - ${s.fields.ShowroomName}`,
+        emailShell(
+          "POS Check Due Today",
+          `<p>Today is your POS check. Please conduct your review and submit before the end of the day.</p>
+           <p style="color:#6E6E6E; font-size:13px;">Showroom: ${s.fields.ShowroomName}</p>`
+        )
+      );
+      auditDueTodayReminders++;
     }
 
     // Overdue escalation, fires once on each exact escalation-day boundary.
@@ -76,5 +95,5 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  return NextResponse.json({ success: true, auditReminders, auditEscalations, actionEscalations });
+  return NextResponse.json({ success: true, auditReminders, auditDueTodayReminders, auditEscalations, actionEscalations });
 }

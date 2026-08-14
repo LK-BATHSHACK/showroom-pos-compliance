@@ -1,21 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { parseAuditExcel } from "@/lib/parseAuditExcel";
-import { listRecords, createRecords, updateRecords, TABLES } from "@/lib/airtable";
-import { computeAuditScore, ragFromScore, actionPriority, ScoredLineItem, CatalogueInfo } from "@/lib/scoring";
-import { getSettings, slaForPriority } from "@/lib/settings";
+import * as XLSX from "xlsx";
+import { parseAuditExcel, isAuditTemplate } from "@/lib/parseAuditExcel";
+import { isMsFormsExport, parseMsFormsExcel } from "@/lib/parseMsFormsExcel";
+import { isSpotCheckWorkbook } from "@/lib/parseSpotCheckExcel";
+import { ParsedAudit } from "@/lib/parsedAudit";
+import { loadSharedContext, processAuditSubmission, ProcessedAuditResult } from "@/lib/processAuditSubmission";
+import { createRecords, TABLES } from "@/lib/airtable";
 import { sendEmail, emailShell } from "@/lib/resend";
 
 export const runtime = "nodejs";
-
-function esc(s: string) {
-  return s.replace(/"/g, '\\"');
-}
-
-function addDays(iso: string, days: number): string {
-  const d = new Date(iso);
-  d.setDate(d.getDate() + days);
-  return d.toISOString().slice(0, 10);
-}
 
 export async function POST(req: NextRequest) {
   try {
@@ -24,139 +17,148 @@ export async function POST(req: NextRequest) {
     if (!file) return NextResponse.json({ error: "No file uploaded." }, { status: 400 });
 
     const buffer = Buffer.from(await file.arrayBuffer());
-    const parsed = parseAuditExcel(buffer);
-    const auditDate = parsed.auditDate || new Date().toISOString().slice(0, 10);
 
-    const showrooms = await listRecords<{ ShowroomName: string; AuditGroup: string }>(TABLES.SHOWROOMS);
-    const showroom = showrooms.find((s) => s.fields.ShowroomName === parsed.showroomName);
-    if (!showroom) {
+    // Two live formats as of the 14 Aug 2026 process change - every
+    // showroom self-reports monthly via the Microsoft Form, and Jordan's
+    // visits are spot checks recorded on the same single-showroom Audit
+    // Intake Template everyone else effectively uses, rather than a full
+    // audit. Detected by workbook shape, not filename.
+    //
+    // The multi-showroom "Spot Check workbook" (lib/parseSpotCheckExcel.ts)
+    // is retired from this live path but not deleted - it's still
+    // detectable so an old copy gets a clear message instead of a
+    // confusing failure, and it's one import away from being reinstated
+    // if the process changes again.
+    const wb = XLSX.read(buffer, { type: "buffer", cellDates: true });
+    let parsedAudits: ParsedAudit[];
+    let format: string;
+    if (isAuditTemplate(wb)) {
+      parsedAudits = [parseAuditExcel(buffer)];
+      format = "Audit Intake Template";
+    } else if (isMsFormsExport(wb)) {
+      parsedAudits = parseMsFormsExcel(buffer);
+      format = "Microsoft Forms export (Monthly self-report)";
+    } else if (isSpotCheckWorkbook(wb)) {
       return NextResponse.json(
-        { error: `Showroom "${parsed.showroomName}" wasn't found in Airtable. Check spelling / that it's active.` },
+        {
+          error:
+            'The multi-showroom Spot Check workbook is no longer used - since 14 Aug 2026, Jordan\'s in-person visits use the "Audit Intake Template.xlsx" instead (one per showroom visited).',
+        },
+        { status: 400 }
+      );
+    } else {
+      return NextResponse.json(
+        {
+          error:
+            'Unrecognised file. This needs to be either the "Audit Intake Template.xlsx" (single showroom - used for Jordan\'s in-person spot checks) or a Microsoft Forms export (every showroom\'s monthly self-report).',
+        },
         { status: 400 }
       );
     }
 
-    const catalogueRecords = await listRecords<{
-      POSName: string; RequiredOptional: CatalogueInfo["RequiredOptional"]; Weight: number; Campaign?: string; Status?: string;
-    }>(TABLES.POS_CATALOGUE);
-    const catalogueByName: Record<string, CatalogueInfo> = {};
-    const catalogueIdByName: Record<string, string> = {};
-    for (const r of catalogueRecords) {
-      catalogueByName[r.fields.POSName] = {
-        RequiredOptional: r.fields.RequiredOptional,
-        Weight: Number(r.fields.Weight) || 1,
-        Campaign: r.fields.Campaign,
-        Status: r.fields.Status,
-      };
-      catalogueIdByName[r.fields.POSName] = r.id;
+    if (parsedAudits.length === 0) {
+      return NextResponse.json({ error: "No showroom data found to import in this file." }, { status: 400 });
     }
 
-    const settings = await getSettings();
+    const ctx = await loadSharedContext();
+    const results: ProcessedAuditResult[] = [];
+    for (const parsed of parsedAudits) {
+      results.push(await processAuditSubmission(parsed, ctx));
+    }
 
-    // "Resolution of previous actions" component: actions raised for this
-    // showroom before this audit's date, and how many of those are now
-    // Verified-Closed. See lib/scoring.ts for the caveat on this being a
-    // proxy rather than a true "did you fix what we flagged last time" check.
-    const priorActions = await listRecords<{ Status: string; DateIdentified: string }>(TABLES.ACTIONS, {
-      filterByFormula: `AND(SEARCH("${esc(parsed.showroomName)}", ARRAYJOIN({Showroom})) > 0, IS_BEFORE({DateIdentified}, "${auditDate}"))`,
-    });
-    const priorOpenCount = priorActions.length;
-    const resolvedNowCount = priorActions.filter((a) => a.fields.Status === "Verified-Closed").length;
-
-    const scoredItems: ScoredLineItem[] = parsed.lineItems.map((li) => ({
-      posName: li.posName,
-      conditionStatus: li.conditionStatus as any,
-      hasPhoto: false, // photo capture happens in a follow-up step, not yet wired to this upload path
-    }));
-
-    const score = computeAuditScore(scoredItems, catalogueByName, { priorOpenCount, resolvedNowCount });
-    const rag = ragFromScore(score.finalScore, settings.GreenThreshold, settings.AmberThreshold);
-
-    const defaultAuditType = showroom.fields.AuditGroup === "Group A" ? "Physical (Group A)" : "Remote (Group B)";
-
-    const [auditRecord] = await createRecords(TABLES.AUDITS, [
-      {
-        Showroom: [showroom.id],
-        AuditType: parsed.auditType || defaultAuditType,
-        AuditDate: auditDate,
-        CompletedByName: parsed.completedByName,
-        CompletedByEmail: parsed.completedByEmail,
-        OverallComplianceScore: score.finalScore,
-        RAGStatus: rag,
-        GeneralComments: parsed.generalComments,
-        SupportRequiredFromMarketing: parsed.supportRequired,
-        SupportRequiredDetails: parsed.supportDetails,
-        Status: "Submitted",
-      },
-    ]);
-
-    const lineItemFields = parsed.lineItems.map((li) => ({
-      Audit: [auditRecord.id],
-      POSItem: catalogueIdByName[li.posName] ? [catalogueIdByName[li.posName]] : [],
-      ConditionStatus: li.conditionStatus,
-      Comments: li.comments,
-      ActionRequired: li.conditionStatus !== "Present-OK",
-    }));
-    const createdLineItems = await createRecords(TABLES.AUDIT_LINE_ITEMS, lineItemFields);
-
-    const actionsToCreate: Record<string, any>[] = [];
-    parsed.lineItems.forEach((li, idx) => {
-      if (li.conditionStatus === "Present-OK") return;
-      const cat = catalogueByName[li.posName];
-      const priority = actionPriority(li.conditionStatus as any, cat?.RequiredOptional || "Optional");
-      const slaDays = slaForPriority(settings, priority);
-      actionsToCreate.push({
-        Showroom: [showroom.id],
-        SourceAuditLineItem: [createdLineItems[idx].id],
-        IssueDescription: `${li.posName}: ${li.conditionStatus}${li.comments ? " - " + li.comments : ""}`,
-        POSItem: catalogueIdByName[li.posName] ? [catalogueIdByName[li.posName]] : [],
-        Priority: priority,
-        OwnerName: "Marketing",
-        OwnerEmail: process.env.MARKETING_NOTIFY_EMAIL || "",
-        DateIdentified: auditDate,
-        TargetCompletionDate: addDays(auditDate, slaDays),
-        Status: "Open",
-      });
-    });
-    const createdActions = actionsToCreate.length ? await createRecords(TABLES.ACTIONS, actionsToCreate) : [];
-
-    const cadenceDays = showroom.fields.AuditGroup === "Group A" ? 28 : 90;
-    await updateRecords(TABLES.SHOWROOMS, [
-      {
-        id: showroom.id,
-        fields: {
-          LastAuditDate: auditDate,
-          NextAuditDue: addDays(auditDate, cadenceDays),
-          ComplianceScore: score.finalScore,
-          RAGStatus: rag,
+    // Any "not on this list" / "other support" free text that came with a
+    // Microsoft Forms response becomes a POS Request, same as if it had
+    // been typed into the app's own Submit New Idea form - so it lands in
+    // your existing approve/decline review flow rather than getting lost.
+    let newIdeasLogged = 0;
+    for (const parsed of parsedAudits) {
+      if (!parsed.newIdeaText) continue;
+      const showroom = ctx.showroomsByNormalizedName.get(parsed.showroomName.toLowerCase().trim());
+      await createRecords(TABLES.POS_REQUESTS, [
+        {
+          Showroom: showroom ? [showroom.id] : [],
+          RequesterName: parsed.completedByName || "",
+          RequesterEmail: parsed.completedByEmail || "",
+          RequestDate: parsed.auditDate || new Date().toISOString().slice(0, 10),
+          IdeaDescription: parsed.newIdeaText,
+          BusinessReason: "",
+          CustomerProblemOpportunity: "",
+          SuggestedLocation: "",
+          ProductCategory: "",
+          Urgency: "Medium",
+          OtherShowroomsMayBenefit: false,
+          Status: "Submitted",
         },
-      },
-    ]);
+      ]);
+      newIdeasLogged++;
+    }
 
+    const ok = results.filter((r): r is Extract<ProcessedAuditResult, { ok: true }> => r.ok);
+    const failed = results.filter((r): r is Extract<ProcessedAuditResult, { ok: false }> => !r.ok);
+
+    // One consolidated summary email per upload, not one per showroom -
+    // a Group A region file can cover 8+ showrooms at once.
     const notifyEmail = process.env.MARKETING_NOTIFY_EMAIL;
-    if (notifyEmail) {
-      const ragColor = rag === "Green" ? "#0ca30c" : rag === "Amber" ? "#fab219" : "#d03b3b";
+    if (notifyEmail && (ok.length || failed.length)) {
+      const ragColor: Record<string, string> = { Green: "#0ca30c", Amber: "#fab219", Red: "#d03b3b" };
+      const rows = ok
+        .map(
+          (r) =>
+            `<tr><td style="padding:4px 8px; border-bottom:1px solid #eee;">${r.showroomName}</td><td style="padding:4px 8px; border-bottom:1px solid #eee; color:${ragColor[r.rag]}; font-weight:bold;">${r.rag}</td><td style="padding:4px 8px; border-bottom:1px solid #eee;">${r.score}/100</td><td style="padding:4px 8px; border-bottom:1px solid #eee;">${r.actionsCreated}</td></tr>`
+        )
+        .join("");
+      const errorRows = failed
+        .map((r) => `<tr><td style="padding:4px 8px; color:#d03b3b;" colspan="4">${r.showroomName}: ${r.error}</td></tr>`)
+        .join("");
       await sendEmail(
         notifyEmail,
-        `Audit submitted: ${parsed.showroomName} - ${rag} (${score.finalScore}/100)`,
+        `Audit${ok.length === 1 ? "" : "s"} submitted (${format}): ${ok.length} showroom${ok.length === 1 ? "" : "s"}${failed.length ? `, ${failed.length} error${failed.length === 1 ? "" : "s"}` : ""}`,
         emailShell(
-          "New Audit Submitted",
-          `<p><strong>Showroom:</strong> ${parsed.showroomName}<br/>
-           <strong>Completed by:</strong> ${parsed.completedByName || "-"}<br/>
-           <strong>Score:</strong> ${score.finalScore}/100 &nbsp; <span style="color:${ragColor}; font-weight:bold;">${rag}</span><br/>
-           <strong>Actions created:</strong> ${createdActions.length}</p>
-           ${parsed.supportRequired ? `<p style="background:#FFF6FA; border-left:4px solid #E6017E; padding:8px 12px;"><strong>Support requested:</strong> ${parsed.supportDetails || "(no details given)"}</p>` : ""}`
+          "New Audit(s) Submitted",
+          `<p><strong>Source:</strong> ${format}</p>
+           <table style="width:100%; border-collapse:collapse; font-size:14px;">
+             <thead><tr style="text-align:left; color:#6E6E6E;"><th style="padding:4px 8px;">Showroom</th><th style="padding:4px 8px;">RAG</th><th style="padding:4px 8px;">Score</th><th style="padding:4px 8px;">Actions created</th></tr></thead>
+             <tbody>${rows}${errorRows}</tbody>
+           </table>
+           ${newIdeasLogged ? `<p>${newIdeasLogged} new POS idea${newIdeasLogged === 1 ? "" : "s"} logged for review in POS Requests.</p>` : ""}`
+        )
+      );
+    }
+
+    // Same consolidation for the designer email - one email listing
+    // everything flagged across the whole batch.
+    const designerEmail = process.env.DESIGNER_NOTIFY_EMAIL;
+    const allFlagged: Array<Record<string, any> & { _showroom: string }> = ok.flatMap((r) =>
+      r.actionsToCreate.map((a) => ({ ...a, _showroom: r.showroomName }))
+    );
+    if (designerEmail && allFlagged.length) {
+      const rows = allFlagged
+        .map(
+          (a) =>
+            `<tr><td style="padding:4px 8px; border-bottom:1px solid #eee;">${a._showroom}</td><td style="padding:4px 8px; border-bottom:1px solid #eee;">${a.IssueDescription}</td><td style="padding:4px 8px; border-bottom:1px solid #eee;">${a.Priority}</td><td style="padding:4px 8px; border-bottom:1px solid #eee;">${a.TargetCompletionDate}</td></tr>`
+        )
+        .join("");
+      await sendEmail(
+        designerEmail,
+        `POS needs organising: ${ok.length} showroom${ok.length === 1 ? "" : "s"} (${allFlagged.length} item${allFlagged.length === 1 ? "" : "s"})`,
+        emailShell(
+          "POS Flagged - Action Needed",
+          `<p>The latest review (${format}) flagged the following POS as missing, damaged, or otherwise needing attention:</p>
+           <table style="width:100%; border-collapse:collapse; font-size:14px;">
+             <thead><tr style="text-align:left; color:#6E6E6E;"><th style="padding:4px 8px;">Showroom</th><th style="padding:4px 8px;">Item / issue</th><th style="padding:4px 8px;">Priority</th><th style="padding:4px 8px;">Target date</th></tr></thead>
+             <tbody>${rows}</tbody>
+           </table>
+           <p>Full details and photos are in the Actions Tracker in the app.</p>`
         )
       );
     }
 
     return NextResponse.json({
       success: true,
-      showroom: parsed.showroomName,
-      score: score.finalScore,
-      rag,
-      actionsCreated: createdActions.length,
-      breakdown: score,
+      format,
+      results: ok.map((r) => ({ showroom: r.showroomName, score: r.score, rag: r.rag, actionsCreated: r.actionsCreated, breakdown: r.breakdown })),
+      errors: failed.map((r) => ({ showroom: r.showroomName, error: r.error })),
+      newIdeasLogged,
     });
   } catch (err: any) {
     console.error(err);

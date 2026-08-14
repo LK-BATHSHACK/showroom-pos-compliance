@@ -13,7 +13,7 @@ export type Settings = {
 };
 
 const DEFAULTS: Settings = {
-  GroupB_ReminderLeadDays: 2,
+  GroupB_ReminderLeadDays: 5,
   Escalation_ToRegionalManager_Days: 5,
   Escalation_ToMarketing_Days: 10,
   SLA_Critical_Days: 3,

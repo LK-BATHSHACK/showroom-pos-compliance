@@ -16,6 +16,42 @@ data store, Resend for email, all secrets in environment variables.
 - POS idea/request submission form with approve/decline
 - Daily reminder/escalation emails via a Vercel Cron job
 
+## Audit upload formats
+
+**Process as of 14 Aug 2026**: every showroom self-reports monthly via the
+Microsoft Form; Jordan's in-person visits are spot checks recorded on the
+Audit Intake Template (not a full separate audit). The upload page
+auto-detects which format a file is by sheet shape, not filename:
+
+1. **Audit Intake Template.xlsx** - single showroom, used for Jordan's
+   in-person spot checks (`lib/parseAuditExcel.ts`). One sheet named
+   "Audit", 29 POS items (see `excel_template/build_template.py`).
+2. **Microsoft Forms export** - every showroom's monthly self-report
+   (`lib/parseMsFormsExcel.ts`) - one row per response, matched by column
+   headers rather than position. Two mappings are best-guesses worth Jordan
+   double-checking: "Duck Sale Wobblers" -> Duck Stickers (General), and
+   "A3 Sale Posters & Displays" -> Monthly Sale Posters (A3) - both overlap
+   a near-duplicate catalogue item name. The "not on this list" and "other
+   support" free-text questions auto-create a POS Request if answered.
+
+**Retired**: the multi-showroom Spot Check workbook
+(`lib/parseSpotCheckExcel.ts`) - code is still there but no longer wired
+into the upload route, since Jordan's role changed from full audits to spot
+checks. Uploading one now gives a clear "no longer used" message rather
+than failing confusingly.
+
+A batch upload (a Microsoft Forms export with multiple responses) sends ONE
+consolidated summary email and ONE consolidated designer email for the
+whole batch, not one per showroom.
+
+**Airtable follow-up needed**: three POS Master Catalogue items were added
+to the code on 14 Aug 2026 (to match everything the Microsoft Form checks) -
+`Tile Specials Leaflets`, `A6 Showroom Exclusives Labels`, `Trustpilot
+Review Stickers`, all as Mandatory, weight 1. These need adding as actual
+rows in the live Airtable POS Master Catalogue table too, or they won't be
+scored (they'll just be silently excluded from the weighted score until the
+rows exist - not an error, just not counted yet).
+
 ## Before you deploy
 
 1. **Set up Airtable.** Follow `Airtable Setup Guide.md` (in the files I
@@ -55,9 +91,9 @@ Visit `http://localhost:3000`, you'll land on the login page first.
    `.env.local.example`, with your real values. Never commit `.env.local`
    itself, it's already in `.gitignore`.
 5. Redeploy if you added env vars after the first deploy.
-6. The `vercel.json` file already schedules the daily reminder job, no
-   extra setup needed for that once deployed (Vercel Cron only runs on
-   deployed projects, not locally).
+6. The `vercel.json` file already schedules the daily reminder job and the
+   monthly summary job, no extra setup needed for either once deployed
+   (Vercel Cron only runs on deployed projects, not locally).
 
 ## Environment variables
 
@@ -68,8 +104,29 @@ Visit `http://localhost:3000`, you'll land on the login page first.
 | `APP_PASSWORD` | Shared password for logging into the app |
 | `SESSION_SECRET` | Random string used to sign the login session cookie |
 | `RESEND_API_KEY` | For sending emails |
-| `MARKETING_NOTIFY_EMAIL` | Where audit-completion and POS-request notifications go |
-| `CRON_SECRET` | Random string, checked on the daily reminder endpoint |
+| `MARKETING_NOTIFY_EMAIL` | Where audit-completion, POS-request, and monthly summary notifications go |
+| `DESIGNER_NOTIFY_EMAIL` | Where "POS flagged as missing/damaged" notifications go (optional - skipped if unset) |
+| `CRON_SECRET` | Random string, checked on every `/api/cron/*` endpoint |
+
+## Emails this app sends
+
+| When | To | Content |
+|---|---|---|
+| An audit is uploaded | `MARKETING_NOTIFY_EMAIL` | Showroom, score, RAG, actions created, any support request |
+| An audit flags items missing/damaged/needing attention | `DESIGNER_NOTIFY_EMAIL` | List of flagged items for that showroom, with priority and target date, so reprints/replacements can be organised |
+| A new POS idea is submitted | `MARKETING_NOTIFY_EMAIL` | The idea and who submitted it, for review in the app |
+| A POS idea is approved (via the Approve button in POS Requests) | `DESIGNER_NOTIFY_EMAIL` | Full idea details, so it can be created and rolled out |
+| A POS idea is declined (via the Decline button in POS Requests) | The requester (`RequesterEmail` on the request) | The reason entered at decline time |
+| Daily, 7am UTC, per showroom | Showroom manager | "Your POS review is coming up in `GroupB_ReminderLeadDays` days" - fires once, on that exact day |
+| Daily, 7am UTC, per showroom | Showroom manager | "Today is your POS check. Please conduct your review and submit before the end of the day." - fires once, on the due date itself |
+| Daily, 7am UTC, per showroom | Showroom manager + Regional Manager | Overdue escalation, at `Escalation_ToRegionalManager_Days` days overdue |
+| Daily, 7am UTC, per showroom | + `MARKETING_NOTIFY_EMAIL` | Further escalation, at `Escalation_ToMarketing_Days` days overdue |
+| Daily, 7am UTC, per action | Action owner | "Action due today" |
+| 1st of each month, 8am UTC | `MARKETING_NOTIFY_EMAIL` | Full estate snapshot: avg score, RAG counts, overdue audits, open actions by priority, per-showroom table |
+
+The reminder lead time (`GroupB_ReminderLeadDays`, default 5) and every SLA/
+escalation threshold live in the Airtable **Settings** table, not in code -
+edit the `SettingValue` cell there to change them, no redeploy needed.
 
 ## Known V1 simplifications (worth knowing about, not blockers)
 

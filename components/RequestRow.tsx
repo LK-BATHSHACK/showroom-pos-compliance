@@ -6,11 +6,17 @@ export default function RequestRow({ request, showroomName }: { request: any; sh
   const [busy, setBusy] = useState(false);
 
   async function decide(newStatus: "Approved" | "Declined") {
+    let marketingComments = "";
+    if (newStatus === "Declined") {
+      const reason = window.prompt("Reason for declining (this is emailed to the requester):");
+      if (reason === null) return; // cancelled - don't decide without a reason
+      marketingComments = reason;
+    }
     setBusy(true);
     const res = await fetch(`/api/pos-request/${request.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status: newStatus }),
+      body: JSON.stringify({ status: newStatus, marketingComments }),
     });
     setBusy(false);
     if (res.ok) setStatus(newStatus);
