@@ -5,12 +5,22 @@ import { ParsedAudit } from "./parsedAudit";
 // builder (excel_template/build_template.py). If that template's layout
 // ever changes, these row/column references must be updated to match.
 //
-// This is one of three formats the upload endpoint understands - see
-// parseMsFormsExcel.ts (Group B Microsoft Forms export) and
-// parseSpotCheckExcel.ts (Group A multi-showroom spot check workbook).
+// This is one of two live formats the upload endpoint understands - see
+// parseMsFormsExcel.ts (every showroom's monthly self-report). This file
+// itself now understands two variants of the "Audit Intake" layout:
+//
+// 1. Legacy single-sheet template - one sheet named "Audit", any showroom
+//    picked from a dropdown. Still supported for any ad-hoc one-off audit.
+// 2. Multi-tab round template (added 21 Aug 2026, at the marketing team's
+//    request) - one tab per Group A showroom, since Jordan visits all of
+//    them in a single day and was juggling a separate file per store.
+//    Each tab has the identical header + item table layout, just with the
+//    showroom name pre-filled on generation. Tabs Jordan didn't get to that
+//    day are simply left blank and are skipped, not treated as an error.
 
 const TABLE_START_ROW = 13; // 1-indexed, matches build_template.py
 const TABLE_END_ROW = 41; // 29 POS items (added Tile Specials Leaflets, A6 Showroom Exclusives Labels, Trustpilot Review Stickers on 14 Aug 2026)
+const TITLE_MARKER = "BATHSHACK"; // cell A1 on every audit tab, old or new
 
 function cellStr(ws: XLSX.WorkSheet, addr: string): string {
   const cell = ws[addr];
@@ -19,18 +29,27 @@ function cellStr(ws: XLSX.WorkSheet, addr: string): string {
   return String(cell.v ?? "").trim();
 }
 
-/** True if this workbook looks like the original single-showroom template. */
-export function isAuditTemplate(wb: XLSX.WorkBook): boolean {
-  return !!wb.Sheets["Audit"];
+/** True if a worksheet has the Audit Intake Template's header/table layout, regardless of its tab name. */
+function isAuditWorksheet(ws: XLSX.WorkSheet): boolean {
+  return cellStr(ws, "A1").toUpperCase().includes(TITLE_MARKER);
 }
 
-export function parseAuditExcel(buffer: Buffer): ParsedAudit {
-  const wb = XLSX.read(buffer, { type: "buffer", cellDates: true });
-  const ws = wb.Sheets["Audit"];
-  if (!ws) {
-    throw new Error('Could not find a sheet named "Audit" in this file. Make sure you\'re uploading the unmodified Audit Intake Template.');
+/**
+ * True if at least one Condition Status cell in the item table has been
+ * filled in. On the multi-tab round template, B3 (showroom) is pre-filled
+ * on every tab whether or not Jordan actually visited that store that day,
+ * so it can't be used to tell "not visited" apart from "filled in" - the
+ * item table is the only field that's genuinely empty until he does.
+ */
+function hasAnyConditionFilled(ws: XLSX.WorkSheet): boolean {
+  for (let row = TABLE_START_ROW; row <= TABLE_END_ROW; row++) {
+    if (cellStr(ws, `C${row}`)) return true;
   }
+  return false;
+}
 
+/** Parses one worksheet using the fixed Audit Intake Template cell layout. `sheetLabel` is only used in error messages. */
+function parseAuditWorksheet(ws: XLSX.WorkSheet, sheetLabel: string): ParsedAudit {
   const showroomName = cellStr(ws, "B3");
   const auditDateRaw = cellStr(ws, "B4");
   const auditType = cellStr(ws, "B5");
@@ -41,7 +60,7 @@ export function parseAuditExcel(buffer: Buffer): ParsedAudit {
   const supportDetails = cellStr(ws, "B10");
 
   if (!showroomName) {
-    throw new Error("Showroom (cell B3) is empty. Please select a showroom before uploading.");
+    throw new Error(`Showroom (cell B3) is empty on the "${sheetLabel}" tab. Please select a showroom before uploading.`);
   }
 
   const lineItems: ParsedAudit["lineItems"] = [];
@@ -52,7 +71,7 @@ export function parseAuditExcel(buffer: Buffer): ParsedAudit {
     const comments = cellStr(ws, `D${row}`);
     if (!posName) continue;
     if (!conditionStatus) {
-      throw new Error(`Row ${row} ("${posName}") has no Condition Status selected. Every POS item needs a status before uploading.`);
+      throw new Error(`Row ${row} ("${posName}") on the "${sheetLabel}" tab has no Condition Status selected. Every POS item needs a status before uploading.`);
     }
     lineItems.push({ category, posName, conditionStatus, comments });
   }
@@ -67,5 +86,61 @@ export function parseAuditExcel(buffer: Buffer): ParsedAudit {
     supportRequired: supportRequiredRaw.toLowerCase() === "yes",
     supportDetails,
     lineItems,
+    sourceLabel: sheetLabel,
   };
+}
+
+/** True if this workbook looks like the legacy single-showroom template (one sheet literally named "Audit"). */
+export function isAuditTemplate(wb: XLSX.WorkBook): boolean {
+  return !!wb.Sheets["Audit"];
+}
+
+export function parseAuditExcel(buffer: Buffer): ParsedAudit {
+  const wb = XLSX.read(buffer, { type: "buffer", cellDates: true });
+  const ws = wb.Sheets["Audit"];
+  if (!ws) {
+    throw new Error('Could not find a sheet named "Audit" in this file. Make sure you\'re uploading the unmodified Audit Intake Template.');
+  }
+  return parseAuditWorksheet(ws, "Audit");
+}
+
+/**
+ * True if this workbook is the multi-tab round template - one tab per
+ * showroom (no sheet literally named "Audit", but one or more tabs carry
+ * the same header layout, detected via the title cell rather than tab name
+ * so it doesn't matter which showrooms the file was generated with).
+ */
+export function isMultiTabAuditTemplate(wb: XLSX.WorkBook): boolean {
+  if (wb.Sheets["Audit"]) return false; // legacy single-sheet format takes precedence
+  return wb.SheetNames.some((name) => name !== "Lists" && isAuditWorksheet(wb.Sheets[name]));
+}
+
+/**
+ * Parses every filled-in tab in a multi-tab round template. Tabs Jordan
+ * didn't visit that day (no Condition Status cells touched) are skipped
+ * silently - not every Group A showroom needs to appear in every upload.
+ * A tab that was started but is missing a required field/status is
+ * reported back as a per-tab error rather than failing the whole upload,
+ * so one mistake on one tab doesn't block the other showrooms in the same
+ * file.
+ */
+export function parseMultiTabAuditExcel(buffer: Buffer): { audits: ParsedAudit[]; errors: { sheet: string; error: string }[] } {
+  const wb = XLSX.read(buffer, { type: "buffer", cellDates: true });
+  const audits: ParsedAudit[] = [];
+  const errors: { sheet: string; error: string }[] = [];
+
+  for (const sheetName of wb.SheetNames) {
+    if (sheetName === "Lists") continue;
+    const ws = wb.Sheets[sheetName];
+    if (!isAuditWorksheet(ws)) continue;
+    if (!hasAnyConditionFilled(ws)) continue; // blank tab - showroom Jordan didn't get to that day
+
+    try {
+      audits.push(parseAuditWorksheet(ws, sheetName));
+    } catch (err: any) {
+      errors.push({ sheet: sheetName, error: err.message || "Failed to parse this tab." });
+    }
+  }
+
+  return { audits, errors };
 }

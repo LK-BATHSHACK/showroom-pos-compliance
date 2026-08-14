@@ -23,10 +23,21 @@ Microsoft Form; Jordan's in-person visits are spot checks recorded on the
 Audit Intake Template (not a full separate audit). The upload page
 auto-detects which format a file is by sheet shape, not filename:
 
-1. **Audit Intake Template.xlsx** - single showroom, used for Jordan's
-   in-person spot checks (`lib/parseAuditExcel.ts`). One sheet named
-   "Audit", 29 POS items (see `excel_template/build_template.py`).
-2. **Microsoft Forms export** - every showroom's monthly self-report
+1. **Audit Intake Template.xlsx** - single showroom, any store, picked from
+   a dropdown (`lib/parseAuditExcel.ts`, sheet named "Audit"). Kept for any
+   ad-hoc one-off audit outside Jordan's regular round.
+2. **Jordan Spot Check Round - Group A.xlsx** (added 21 Aug 2026) - the
+   same layout, but one tab per Group A showroom (Boucher, Shore Rd.,
+   Dargan, Antrim, Lisburn, Lurgan, Ballymena) in a single file, since
+   Jordan visits all of them in one day. Each tab's showroom name is
+   pre-filled so there's no dropdown to get wrong. Tabs he doesn't get to
+   that day are just left blank - the parser skips them rather than erroring,
+   detected by whether any Condition Status cell in that tab was touched.
+   A tab that's started but missing a required field is reported back as a
+   per-tab error without blocking the other showrooms in the same file.
+   Both template variants share 29 POS items (see
+   `excel_template/build_template.py`, which now generates both files).
+3. **Microsoft Forms export** - every showroom's monthly self-report
    (`lib/parseMsFormsExcel.ts`) - one row per response, matched by column
    headers rather than position. Two mappings are best-guesses worth Jordan
    double-checking: "Duck Sale Wobblers" -> Duck Stickers (General), and
@@ -38,11 +49,23 @@ auto-detects which format a file is by sheet shape, not filename:
 (`lib/parseSpotCheckExcel.ts`) - code is still there but no longer wired
 into the upload route, since Jordan's role changed from full audits to spot
 checks. Uploading one now gives a clear "no longer used" message rather
-than failing confusingly.
+than failing confusingly. (Its multi-showroom convenience lives on in the
+new Jordan Spot Check Round file above, just in the Audit Intake layout
+rather than the old Spot Check workbook's format.)
 
-A batch upload (a Microsoft Forms export with multiple responses) sends ONE
+Any batch upload (a Microsoft Forms export with multiple responses, or a
+multi-tab round file with multiple filled-in showrooms) sends ONE
 consolidated summary email and ONE consolidated designer email for the
 whole batch, not one per showroom.
+
+**Airtable select-field options must exist before code sends them.**
+Airtable rejects a single/multi-select write with a value that isn't
+already one of that field's options (e.g. `AuditType` = "Self-Reported
+(Monthly)") - `lib/airtable.ts` now sends `typecast: true` so Airtable will
+add a missing option automatically where the token's permissions allow it,
+but if it doesn't, the fix is to add the option by hand in Airtable once
+(Field menu -> Edit field -> Add option), the same way as any new POS
+Master Catalogue item.
 
 **Airtable follow-up needed**: three POS Master Catalogue items were added
 to the code on 14 Aug 2026 (to match everything the Microsoft Form checks) -
@@ -146,8 +169,8 @@ edit the `SettingValue` cell there to change them, no redeploy needed.
   (`CRITICAL_POS_ITEM_NAMES` in `lib/scoring.ts`) is empty, exactly as the
   design doc flagged, this needs Marketing to agree the short list of
   items serious enough to trigger it.
-- **Audit cadence** defaults to every 28 days for Group A showrooms and
-  every 90 days for Group B, hardcoded in `app/api/upload-audit/route.ts`.
+- **Audit cadence** is a uniform 30 days for every showroom (since the 14
+  Aug 2026 process change), hardcoded in `lib/processAuditSubmission.ts`.
   Easy to change, or move into Settings if you want it configurable
   without a code change.
 - **Reminder/escalation emails fire on an exact day match** (e.g. "exactly

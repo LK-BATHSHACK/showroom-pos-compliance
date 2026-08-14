@@ -38,9 +38,10 @@ export default function UploadPage() {
     <div>
       <h1 style={{ fontSize: 24, marginBottom: 4 }}>Submit an Audit</h1>
       <p style={{ color: "#6E6E6E", marginTop: 0, marginBottom: 24 }}>
-        Upload one of: a completed "Audit Intake Template.xlsx" (single showroom), a Microsoft Forms
-        export (Group B remote checklist), or the Spot Check workbook (Group A - one file covers a
-        whole region). The format is detected automatically.
+        Upload one of: a completed Audit Intake Template - either the single-showroom version or
+        Jordan's multi-tab round file (one tab per Group A showroom) - or a Microsoft Forms export
+        (every showroom's monthly self-report). The format is detected automatically. The old
+        multi-showroom Spot Check workbook is no longer used.
       </p>
 
       <Card>

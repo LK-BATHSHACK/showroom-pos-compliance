@@ -108,7 +108,13 @@ export async function createRecords<T = Record<string, any>>(
     const res = await fetch(tableUrl(table), {
       method: "POST",
       headers: headers(),
-      body: JSON.stringify({ records: batch.map((fields) => ({ fields })) }),
+      // typecast:true lets Airtable auto-add a new single/multi-select option
+      // instead of rejecting the write outright - e.g. if code ever sends an
+      // AuditType or ConditionStatus value that isn't in the field's option
+      // list yet. This only works if the token's user has schema-edit
+      // permission on the base; if not, you still need to add the option by
+      // hand in Airtable once (same as any new POS Master Catalogue item).
+      body: JSON.stringify({ records: batch.map((fields) => ({ fields })), typecast: true }),
     });
     if (!res.ok) {
       const body = await res.text();
@@ -135,7 +141,7 @@ export async function updateRecords<T = Record<string, any>>(
     const res = await fetch(tableUrl(table), {
       method: "PATCH",
       headers: headers(),
-      body: JSON.stringify({ records: batch }),
+      body: JSON.stringify({ records: batch, typecast: true }),
     });
     if (!res.ok) {
       const body = await res.text();

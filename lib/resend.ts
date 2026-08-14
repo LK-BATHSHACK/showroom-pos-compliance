@@ -16,12 +16,27 @@ export async function sendEmail(to: string | string[], subject: string, html: st
     return { skipped: true };
   }
   const resend = getClient();
-  return resend.emails.send({
-    from: "Showroom POS Compliance <notifications@bathshapp.com>",
+  // IMPORTANT: this "from" address must be on a domain that shows as
+  // Verified on the Domains page of the Resend account tied to
+  // RESEND_API_KEY. Resend rejects the send outright if it isn't - and the
+  // SDK does NOT throw on that rejection (see the catch below), it just
+  // returns { data: null, error }, so a domain mismatch here fails 100% of
+  // emails completely silently unless the caller checks `error`.
+  const result = await resend.emails.send({
+    from: "Showroom POS Compliance <notifications@bathshack.com>",
     to,
     subject,
     html,
   });
+  if (result.error) {
+    // Resend's SDK resolves (doesn't reject) on a send failure, so without
+    // this the caller's `await sendEmail(...)` looks like it succeeded even
+    // when nothing was sent - this is the fix for exactly that silent-failure
+    // pattern (found 12 Aug 2026: every email was failing because the old
+    // "from" address used an unverified domain, and nothing ever logged it).
+    console.error(`Resend send failed - to: ${to}, subject: "${subject}":`, result.error);
+  }
+  return result;
 }
 
 export const BRAND = {

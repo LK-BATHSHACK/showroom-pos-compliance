@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as XLSX from "xlsx";
-import { parseAuditExcel, isAuditTemplate } from "@/lib/parseAuditExcel";
+import { parseAuditExcel, isAuditTemplate, isMultiTabAuditTemplate, parseMultiTabAuditExcel } from "@/lib/parseAuditExcel";
 import { isMsFormsExport, parseMsFormsExcel } from "@/lib/parseMsFormsExcel";
 import { isSpotCheckWorkbook } from "@/lib/parseSpotCheckExcel";
 import { ParsedAudit } from "@/lib/parsedAudit";
@@ -20,9 +20,14 @@ export async function POST(req: NextRequest) {
 
     // Two live formats as of the 14 Aug 2026 process change - every
     // showroom self-reports monthly via the Microsoft Form, and Jordan's
-    // visits are spot checks recorded on the same single-showroom Audit
-    // Intake Template everyone else effectively uses, rather than a full
-    // audit. Detected by workbook shape, not filename.
+    // visits are spot checks recorded on the Audit Intake Template.
+    // Detected by workbook shape, not filename.
+    //
+    // The Audit Intake Template itself has two variants (added 21 Aug
+    // 2026): the legacy single-sheet file (any one showroom), and a
+    // multi-tab "round" file - one tab per Group A showroom - so Jordan can
+    // fill in one file for his whole day's round instead of a separate file
+    // per store. Tabs he didn't get to that day are just left blank.
     //
     // The multi-showroom "Spot Check workbook" (lib/parseSpotCheckExcel.ts)
     // is retired from this live path but not deleted - it's still
@@ -32,9 +37,18 @@ export async function POST(req: NextRequest) {
     const wb = XLSX.read(buffer, { type: "buffer", cellDates: true });
     let parsedAudits: ParsedAudit[];
     let format: string;
+    // Parse-time failures (e.g. a tab in a multi-tab round file that's
+    // missing a required field) - reported alongside processing failures
+    // rather than aborting the whole upload over one bad tab.
+    let parseErrors: { showroom: string; error: string }[] = [];
     if (isAuditTemplate(wb)) {
       parsedAudits = [parseAuditExcel(buffer)];
       format = "Audit Intake Template";
+    } else if (isMultiTabAuditTemplate(wb)) {
+      const parsed = parseMultiTabAuditExcel(buffer);
+      parsedAudits = parsed.audits;
+      parseErrors = parsed.errors.map((e) => ({ showroom: e.sheet, error: e.error }));
+      format = "Audit Intake Template (multi-showroom round)";
     } else if (isMsFormsExport(wb)) {
       parsedAudits = parseMsFormsExcel(buffer);
       format = "Microsoft Forms export (Monthly self-report)";
@@ -56,8 +70,14 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (parsedAudits.length === 0) {
-      return NextResponse.json({ error: "No showroom data found to import in this file." }, { status: 400 });
+    if (parsedAudits.length === 0 && parseErrors.length === 0) {
+      return NextResponse.json({ error: "No showroom data found to import in this file. If this is a multi-tab round file, every tab was left blank." }, { status: 400 });
+    }
+    if (parsedAudits.length === 0 && parseErrors.length > 0) {
+      return NextResponse.json(
+        { error: `Every filled-in tab had a problem: ${parseErrors.map((e) => `${e.showroom} (${e.error})`).join("; ")}` },
+        { status: 400 }
+      );
     }
 
     const ctx = await loadSharedContext();
@@ -95,11 +115,15 @@ export async function POST(req: NextRequest) {
 
     const ok = results.filter((r): r is Extract<ProcessedAuditResult, { ok: true }> => r.ok);
     const failed = results.filter((r): r is Extract<ProcessedAuditResult, { ok: false }> => !r.ok);
+    // Combines Airtable-write failures (from processAuditSubmission) with
+    // parse-time failures (a bad tab in a multi-tab round file) so both
+    // show up together in the summary email and JSON response.
+    const allErrors = [...parseErrors, ...failed.map((r) => ({ showroom: r.showroomName, error: r.error }))];
 
     // One consolidated summary email per upload, not one per showroom -
     // a Group A region file can cover 8+ showrooms at once.
     const notifyEmail = process.env.MARKETING_NOTIFY_EMAIL;
-    if (notifyEmail && (ok.length || failed.length)) {
+    if (notifyEmail && (ok.length || allErrors.length)) {
       const ragColor: Record<string, string> = { Green: "#0ca30c", Amber: "#fab219", Red: "#d03b3b" };
       const rows = ok
         .map(
@@ -107,12 +131,12 @@ export async function POST(req: NextRequest) {
             `<tr><td style="padding:4px 8px; border-bottom:1px solid #eee;">${r.showroomName}</td><td style="padding:4px 8px; border-bottom:1px solid #eee; color:${ragColor[r.rag]}; font-weight:bold;">${r.rag}</td><td style="padding:4px 8px; border-bottom:1px solid #eee;">${r.score}/100</td><td style="padding:4px 8px; border-bottom:1px solid #eee;">${r.actionsCreated}</td></tr>`
         )
         .join("");
-      const errorRows = failed
-        .map((r) => `<tr><td style="padding:4px 8px; color:#d03b3b;" colspan="4">${r.showroomName}: ${r.error}</td></tr>`)
+      const errorRows = allErrors
+        .map((r) => `<tr><td style="padding:4px 8px; color:#d03b3b;" colspan="4">${r.showroom}: ${r.error}</td></tr>`)
         .join("");
       await sendEmail(
         notifyEmail,
-        `Audit${ok.length === 1 ? "" : "s"} submitted (${format}): ${ok.length} showroom${ok.length === 1 ? "" : "s"}${failed.length ? `, ${failed.length} error${failed.length === 1 ? "" : "s"}` : ""}`,
+        `Audit${ok.length === 1 ? "" : "s"} submitted (${format}): ${ok.length} showroom${ok.length === 1 ? "" : "s"}${allErrors.length ? `, ${allErrors.length} error${allErrors.length === 1 ? "" : "s"}` : ""}`,
         emailShell(
           "New Audit(s) Submitted",
           `<p><strong>Source:</strong> ${format}</p>
@@ -157,7 +181,7 @@ export async function POST(req: NextRequest) {
       success: true,
       format,
       results: ok.map((r) => ({ showroom: r.showroomName, score: r.score, rag: r.rag, actionsCreated: r.actionsCreated, breakdown: r.breakdown })),
-      errors: failed.map((r) => ({ showroom: r.showroomName, error: r.error })),
+      errors: allErrors,
       newIdeasLogged,
     });
   } catch (err: any) {
