@@ -36,7 +36,16 @@ export default async function ActionsPage() {
   // disappearing the moment the designer marks a fix done, since the fix
   // isn't confirmed until an independent audit reports that item back as
   // Present-OK (see the auto-verification step in processAuditSubmission.ts).
-  const open = actionRecords.filter((a) => a.fields.Status !== "Verified-Closed");
+  //
+  // Also requires a linked Showroom - a handful of fully-blank Action
+  // records pre-date any real use of the app (same junk-row pattern found
+  // in POS Requests). Their Status field is blank, which is not
+  // "Verified-Closed" either, so without this extra check they'd render as
+  // empty rows at the top of the tracker (found 14 Aug 2026, caused by
+  // widening this filter to keep "Resolved" items visible - blank-status
+  // junk rows used to be excluded only by coincidence, since blank was
+  // never "Open" or "In Progress").
+  const open = actionRecords.filter((a) => a.fields.Status !== "Verified-Closed" && (a.fields.Showroom || []).length > 0);
 
   const sorted = open.sort((a, b) => {
     const pa = PRIORITY_ORDER.indexOf(a.fields.Priority);
