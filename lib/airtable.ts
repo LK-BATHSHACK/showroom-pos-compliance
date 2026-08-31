@@ -10,6 +10,12 @@
 const PREVIEW_MODE = process.env.PREVIEW_MODE === "1";
 
 const API_ROOT = "https://api.airtable.com/v0";
+// Attachment uploads go through a separate host from the regular record API -
+// see https://airtable.com/developers/web/api/upload-attachment. Confirmed
+// (Airtable community, 31 Aug 2026) that repeated calls APPEND to the
+// field's existing attachments rather than replacing them, which is what
+// lets multiple photos land on one Answer's Photo field one file at a time.
+const CONTENT_API_ROOT = "https://content.airtable.com/v0";
 
 function baseId() {
   const id = process.env.AIRTABLE_BASE_ID;
@@ -153,6 +159,34 @@ export async function updateRecords<T = Record<string, any>>(
   return updated;
 }
 
+export type AttachmentUpload = { filename: string; contentType: string; base64: string };
+
+// Airtable's own hard limit is 5MB per file on this endpoint - kept as a
+// named export so the API route and client can validate against the same
+// number instead of duplicating a magic constant.
+export const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
+
+/** Uploads one file onto an attachment field of an existing record. Appends - does not replace - any attachments already there, so call once per file for multi-photo fields. */
+export async function uploadAttachment(recordId: string, fieldIdOrName: string, file: AttachmentUpload): Promise<void> {
+  if (PREVIEW_MODE) {
+    const { mockUploadAttachment } = await import("./mockData");
+    return mockUploadAttachment(recordId, fieldIdOrName, file);
+  }
+
+  const res = await fetch(`${CONTENT_API_ROOT}/${baseId()}/${recordId}/${encodeURIComponent(fieldIdOrName)}/uploadAttachment`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token()}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ contentType: file.contentType, file: file.base64, filename: file.filename }),
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Airtable uploadAttachment "${fieldIdOrName}" on ${recordId} failed (${res.status}): ${body}`);
+  }
+}
+
 export const TABLES = {
   SETTINGS: "Settings",
   SHOWROOMS: "Showrooms",
@@ -161,4 +195,14 @@ export const TABLES = {
   AUDIT_LINE_ITEMS: "Audit Line Items",
   ACTIONS: "Actions",
   POS_REQUESTS: "POS Requests",
+  // Generalised compliance-tool tables (added for the H&S Walkaround build -
+  // see "Showroom Compliance Tool - Generalisation Architecture Proposal.md").
+  // The old tables above are untouched; these are additive.
+  USERS: "Users",
+  SITES: "Sites",
+  CHECKLIST_TEMPLATES: "Checklist Templates",
+  TEMPLATE_QUESTIONS: "Template Questions",
+  ROSTERS: "Rosters",
+  SUBMISSIONS: "Submissions",
+  ANSWERS: "Answers",
 } as const;

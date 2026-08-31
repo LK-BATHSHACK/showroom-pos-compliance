@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createRecords, listRecords, TABLES } from "@/lib/airtable";
 import { sendEmail, emailShell } from "@/lib/resend";
+import { requireRole } from "@/lib/auth";
 
 export async function POST(req: NextRequest) {
+  const session = await requireRole(["Admin", "Marketing"]);
+  if (!session) return NextResponse.json({ error: "Forbidden." }, { status: 403 });
+
   try {
     const body = await req.json();
     const {

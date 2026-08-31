@@ -7,10 +7,14 @@ import { ParsedAudit } from "@/lib/parsedAudit";
 import { loadSharedContext, processAuditSubmission, ProcessedAuditResult } from "@/lib/processAuditSubmission";
 import { createRecords, TABLES } from "@/lib/airtable";
 import { sendEmail, emailShell } from "@/lib/resend";
+import { requireRole } from "@/lib/auth";
 
 export const runtime = "nodejs";
 
 export async function POST(req: NextRequest) {
+  const session = await requireRole(["Admin", "Marketing"]);
+  if (!session) return NextResponse.json({ error: "Forbidden." }, { status: 403 });
+
   try {
     const formData = await req.formData();
     const file = formData.get("file") as unknown as File | null;

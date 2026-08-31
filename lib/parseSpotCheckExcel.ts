@@ -50,6 +50,24 @@ function norm(s: string): string {
   return String(s ?? "").toLowerCase().replace(/\s+/g, " ").trim();
 }
 
+// Known showroom-column-name aliases in this tracker that don't match the
+// Airtable Showroom's own name field directly - confirmed with Lorraine
+// 31 Aug 2026:
+// - "Tileshack Huttons" is Shore Rd. (full name "Shore Road - Tileshack"),
+//   not a separate/missing showroom. This also resolves what had been
+//   logged as a coverage gap for Shore Rd. in the tracker - it was never
+//   missing, just present under this column name instead.
+// - "Belfast" is Dargan - same pattern, an old/informal column name for an
+//   existing Airtable showroom rather than a missing one.
+const SHOWROOM_NAME_ALIASES: Record<string, string> = {
+  "tileshack huttons": "Shore Rd.",
+  "belfast": "Dargan",
+};
+
+function resolveShowroomName(rawName: string): string {
+  return SHOWROOM_NAME_ALIASES[norm(rawName)] ?? rawName;
+}
+
 export function isSpotCheckWorkbook(wb: XLSX.WorkBook): boolean {
   const hasFeedbackTab = wb.SheetNames.includes("Feedback & New Ideas");
   const hasRegionTab = wb.SheetNames.some((n) => /^(NI|ROI)\b/i.test(n));
@@ -80,8 +98,8 @@ export function parseSpotCheckExcel(buffer: Buffer): ParsedAudit[] {
     const headerRow = rows[headerRowIdx];
     const showroomCols: { col: number; name: string }[] = [];
     for (let c = 2; c < headerRow.length; c++) {
-      const name = String(headerRow[c] ?? "").trim();
-      if (name) showroomCols.push({ col: c, name });
+      const rawName = String(headerRow[c] ?? "").trim();
+      if (rawName) showroomCols.push({ col: c, name: resolveShowroomName(rawName) });
     }
 
     const completedDateRaw = String(rows[0]?.[1] ?? "").trim();

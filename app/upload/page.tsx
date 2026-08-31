@@ -39,9 +39,10 @@ export default function UploadPage() {
       <h1 style={{ fontSize: 24, marginBottom: 4 }}>Submit an Audit</h1>
       <p style={{ color: "#6E6E6E", marginTop: 0, marginBottom: 24 }}>
         Upload one of: a completed Audit Intake Template - either the single-showroom version or
-        Jordan's multi-tab round file (one tab per Group A showroom) - or a Microsoft Forms export
-        (every showroom's monthly self-report). The format is detected automatically. The old
-        multi-showroom Spot Check workbook is no longer used.
+        Jordan's multi-tab round file (one tab per Group A showroom) - a Microsoft Forms export
+        (every showroom's monthly self-report), or the Showrooms POS Spot Check NI/ROI tracker
+        (Jordan's regular working file for his Group A/B rounds). The format is detected
+        automatically.
       </p>
 
       <Card>
