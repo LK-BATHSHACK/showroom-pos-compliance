@@ -428,3 +428,82 @@ async function sendImmediateEscalation(
 function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
+
+// ---------------------------------------------------------------------------
+// H&S compliance score - a per-site pass rate for the site's most recent H&S
+// Walkaround submission (applicable answers minus answers that produced a
+// flagged Action, e.g. a roster mismatch or reported issue), kept as its OWN
+// score rather than blended into POS's 100-point score. Confirmed with
+// Lorraine 31 Aug 2026 ("the overall compliance score should now take into
+// consideration h&s and pos checks" -> "Two separate scores, shown side by
+// side") - H&S was deliberately built as pass/fail-with-escalation rather
+// than a weighted point score (see the architecture doc's "Scoring is
+// deliberately not proposed as a universal feature" decision), so blending
+// it into one number would misrepresent both.
+//
+// Unlike POS, there's no auto-re-verification of a resolved Action on the
+// NEXT walkaround - so this score is a snapshot of that one walkaround's own
+// findings (an answer counts as flagged if ANY Action was ever sourced from
+// it, regardless of the Action's current Status), not a rolling open-issues
+// count. Callers should pass hsAnswers/hsActions already filtered down to
+// H&S-template records (same filtering hs-review/page.tsx already does via
+// Template -> Template Questions -> Answers -> Actions), so this function
+// doesn't need to know about templates/questions at all.
+// ---------------------------------------------------------------------------
+
+export type HSSiteScore = {
+  siteId: string;
+  siteName: string;
+  latestSubmissionId: string | null;
+  latestSubmissionDate: string | null;
+  applicableCount: number;
+  flaggedCount: number;
+  score: number | null; // 0-100 pass rate, null = no submission yet for this site
+};
+
+export function computeHSSiteScores(
+  hsApplicableSites: { id: string; name: string }[],
+  hsSubmissions: { id: string; fields: { Site?: string[]; SubmissionDate?: string } }[],
+  hsAnswers: { id: string; fields: { Submission?: string[] } }[],
+  hsActions: { fields: { SourceAnswer?: string[] } }[]
+): HSSiteScore[] {
+  const flaggedAnswerIds = new Set<string>();
+  hsActions.forEach((a) => (a.fields.SourceAnswer || []).forEach((id) => flaggedAnswerIds.add(id)));
+
+  // Latest submission per site - hsSubmissions can arrive in any order, so
+  // compare dates explicitly rather than relying on a caller-provided sort.
+  const latestBySite = new Map<string, { id: string; date: string }>();
+  hsSubmissions.forEach((s) => {
+    const siteId = s.fields.Site?.[0];
+    const date = s.fields.SubmissionDate || "";
+    if (!siteId) return;
+    const current = latestBySite.get(siteId);
+    if (!current || date > current.date) latestBySite.set(siteId, { id: s.id, date });
+  });
+
+  return hsApplicableSites.map((site) => {
+    const latest = latestBySite.get(site.id);
+    if (!latest) {
+      return { siteId: site.id, siteName: site.name, latestSubmissionId: null, latestSubmissionDate: null, applicableCount: 0, flaggedCount: 0, score: null };
+    }
+    const applicableAnswers = hsAnswers.filter((a) => (a.fields.Submission || []).includes(latest.id));
+    const flaggedCount = applicableAnswers.filter((a) => flaggedAnswerIds.has(a.id)).length;
+    const score = applicableAnswers.length === 0 ? null : Math.round(((applicableAnswers.length - flaggedCount) / applicableAnswers.length) * 1000) / 10;
+    return {
+      siteId: site.id,
+      siteName: site.name,
+      latestSubmissionId: latest.id,
+      latestSubmissionDate: latest.date || null,
+      applicableCount: applicableAnswers.length,
+      flaggedCount,
+      score,
+    };
+  });
+}
+
+/** Estate-wide H&S average = the mean of each H&S-applicable site's latest score (sites with no submission yet don't drag the average down to 0 - they're surfaced separately as "not yet walked around"). */
+export function estateHSAverage(siteScores: HSSiteScore[]): number | null {
+  const scored = siteScores.filter((s): s is HSSiteScore & { score: number } => s.score !== null);
+  if (scored.length === 0) return null;
+  return Math.round((scored.reduce((sum, s) => sum + s.score, 0) / scored.length) * 10) / 10;
+}

@@ -312,14 +312,23 @@ const auditLineItems: Rec[] = [];
 // local demo aid that's never used in production.
 // ---------------------------------------------------------------------------
 
-const siteSeed: { name: string; siteType: string; region: string; pos: boolean; hs: boolean }[] = [
-  { name: "Boucher", siteType: "Showroom", region: "NI", pos: true, hs: true },
-  { name: "Shore Rd.", siteType: "Showroom", region: "NI", pos: true, hs: true },
-  { name: "Dargan Showroom", siteType: "Showroom", region: "NI", pos: true, hs: true },
-  { name: "Antrim Showroom", siteType: "Showroom", region: "NI", pos: true, hs: true },
+// sourceShowroomName maps a Site back to the old Showrooms table via the
+// SourceShowroom link field (Sites and Showrooms deliberately DON'T share
+// naming - e.g. Site "Dargan Showroom" vs Showroom "Dargan" - see
+// resolveShowroomForSite in lib/posWalkaround.ts, which resolves through
+// this link rather than name-matching). Left undefined for sites with no
+// old-Showrooms equivalent - Cheadle is a genuinely new POS+H&S site added
+// straight into Sites with no migration history, and Antrim Warehouse has
+// POSChecklistApplies=false so it never needs one; both are realistic
+// "POS doesn't apply here" cases for the in-tool form to handle gracefully.
+const siteSeed: { name: string; siteType: string; region: string; pos: boolean; hs: boolean; sourceShowroomName?: string }[] = [
+  { name: "Boucher", siteType: "Showroom", region: "NI", pos: true, hs: true, sourceShowroomName: "Boucher" },
+  { name: "Shore Rd.", siteType: "Showroom", region: "NI", pos: true, hs: true, sourceShowroomName: "Shore Rd." },
+  { name: "Dargan Showroom", siteType: "Showroom", region: "NI", pos: true, hs: true, sourceShowroomName: "Dargan" },
+  { name: "Antrim Showroom", siteType: "Showroom", region: "NI", pos: true, hs: true, sourceShowroomName: "Antrim" },
   { name: "Antrim Warehouse & Offices", siteType: "Warehouse", region: "NI", pos: false, hs: true },
-  { name: "Cork Showroom", siteType: "Showroom", region: "ROI", pos: true, hs: true },
-  { name: "Dublin Showroom", siteType: "Showroom", region: "ROI", pos: true, hs: true },
+  { name: "Cork Showroom", siteType: "Showroom", region: "ROI", pos: true, hs: true, sourceShowroomName: "Cork" },
+  { name: "Dublin Showroom", siteType: "Showroom", region: "ROI", pos: true, hs: true, sourceShowroomName: "Dublin" },
   { name: "Cheadle", siteType: "Showroom", region: "GB", pos: true, hs: true },
 ];
 
@@ -333,6 +342,7 @@ const sites: Rec[] = siteSeed.map((s) => ({
     Active: true,
     POSChecklistApplies: s.pos,
     "H&SChecklistApplies": s.hs,
+    SourceShowroom: s.sourceShowroomName ? [byName(s.sourceShowroomName).id] : [],
   },
 }));
 

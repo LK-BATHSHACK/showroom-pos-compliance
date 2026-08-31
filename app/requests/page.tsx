@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { listRecords, TABLES } from "@/lib/airtable";
-import { Card } from "@/components/ui";
-import RequestRow from "@/components/RequestRow";
+import RequestsTabs from "@/components/RequestsTabs";
 
 export const dynamic = "force-dynamic";
 
@@ -12,6 +11,8 @@ export default async function RequestsPage() {
   ]);
   const nameById: Record<string, string> = {};
   showrooms.forEach((s) => (nameById[s.id] = s.fields.ShowroomName));
+
+  const rows = requests.map((r) => ({ request: r, showroomName: nameById[r.fields.Showroom?.[0]] || "-" }));
 
   return (
     <div>
@@ -24,29 +25,11 @@ export default async function RequestsPage() {
           href="/requests/new"
           style={{ background: "#E6017E", color: "#fff", padding: "10px 18px", borderRadius: 6, fontSize: 14, fontWeight: 600, textDecoration: "none" }}
         >
-          + Submit New Idea
+          + Submit a Request
         </Link>
       </div>
 
-      <Card>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
-          <thead>
-            <tr style={{ textAlign: "left", color: "#6E6E6E", borderBottom: "1px solid #eee" }}>
-              <th style={{ padding: "8px 6px" }}>Showroom</th>
-              <th>Idea</th>
-              <th>Requester</th>
-              <th>Urgency</th>
-              <th>Status</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {requests.map((r) => (
-              <RequestRow key={r.id} request={r} showroomName={nameById[r.fields.Showroom?.[0]] || "-"} />
-            ))}
-          </tbody>
-        </table>
-      </Card>
+      <RequestsTabs rows={rows} />
     </div>
   );
 }

@@ -12,12 +12,15 @@ export async function POST(req: NextRequest) {
     const {
       showroomName, requesterName, requesterEmail, ideaDescription,
       businessReason, customerProblemOpportunity, suggestedLocation,
-      productCategory, urgency, otherShowroomsMayBenefit,
+      productCategory, urgency, otherShowroomsMayBenefit, requestType,
     } = body;
 
     if (!showroomName || !ideaDescription) {
       return NextResponse.json({ error: "Showroom and idea description are required." }, { status: 400 });
     }
+    // Defaults to "New Idea" for older callers that don't send this yet -
+    // matches RequestTypeBadge's own fallback.
+    const resolvedRequestType = requestType === "Replacement/Support Request" ? "Replacement/Support Request" : "New Idea";
 
     const showrooms = await listRecords<{ ShowroomName: string }>(TABLES.SHOWROOMS);
     const showroom = showrooms.find((s) => s.fields.ShowroomName === showroomName);
@@ -36,6 +39,7 @@ export async function POST(req: NextRequest) {
         ProductCategory: productCategory || "",
         Urgency: urgency || "Medium",
         OtherShowroomsMayBenefit: !!otherShowroomsMayBenefit,
+        RequestType: resolvedRequestType,
         Status: "Submitted",
       },
     ]);
@@ -44,13 +48,14 @@ export async function POST(req: NextRequest) {
     if (notifyEmail) {
       await sendEmail(
         notifyEmail,
-        `New POS idea submitted: ${showroomName}`,
+        `New POS ${resolvedRequestType === "New Idea" ? "idea" : "replacement/support request"} submitted: ${showroomName}`,
         emailShell(
           "New POS Idea/Request",
-          `<p><strong>Showroom:</strong> ${showroomName}<br/>
+          `<p><strong>Type:</strong> ${resolvedRequestType}<br/>
+           <strong>Showroom:</strong> ${showroomName}<br/>
            <strong>Submitted by:</strong> ${requesterName || "-"} (${requesterEmail || "no email given"})<br/>
            <strong>Urgency:</strong> ${urgency || "Medium"}</p>
-           <p><strong>Idea:</strong> ${ideaDescription}</p>
+           <p><strong>Details:</strong> ${ideaDescription}</p>
            <p>Review it in the app's POS Requests tab.</p>`
         )
       );

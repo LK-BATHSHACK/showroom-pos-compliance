@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import { RequestTypeBadge } from "./ui";
 
 export default function RequestRow({ request, showroomName }: { request: any; showroomName: string }) {
   const [status, setStatus] = useState(request.fields.Status);
@@ -27,6 +28,7 @@ export default function RequestRow({ request, showroomName }: { request: any; sh
   return (
     <tr style={{ borderBottom: "1px solid #f2f2f2" }}>
       <td style={{ padding: "8px 6px" }}>{showroomName}</td>
+      <td><RequestTypeBadge requestType={request.fields.RequestType} /></td>
       <td style={{ maxWidth: 280 }}>{request.fields.IdeaDescription}</td>
       <td>{request.fields.RequesterName || "-"}</td>
       <td>{request.fields.Urgency}</td>

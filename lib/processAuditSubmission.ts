@@ -24,6 +24,13 @@ export type ProcessedAuditResult =
       actionsToCreate: Record<string, any>[];
       actionsVerified: number;
       breakdown: ScoreBreakdown;
+      // Record IDs of what was just created, so a caller that needs to do
+      // something AFTER the fact (e.g. the in-tool POS Walkaround form
+      // uploading evidence photos once the Audit/Audit Line Item records
+      // exist) doesn't have to re-query and guess which records are "this"
+      // submission's. Excel-upload callers can ignore these.
+      auditId: string;
+      lineItemIdByPosName: Record<string, string>;
     }
   | { ok: false; showroomName: string; sourceLabel?: string; error: string };
 
@@ -191,6 +198,11 @@ export async function processAuditSubmission(parsed: ParsedAudit, ctx: SharedCon
     },
   ]);
 
+  const lineItemIdByPosName: Record<string, string> = {};
+  parsed.lineItems.forEach((li, idx) => {
+    lineItemIdByPosName[li.posName] = createdLineItems[idx].id;
+  });
+
   return {
     ok: true,
     showroomName: showroom.fields.ShowroomName,
@@ -201,5 +213,7 @@ export async function processAuditSubmission(parsed: ParsedAudit, ctx: SharedCon
     actionsToCreate,
     actionsVerified: toVerify.length,
     breakdown: score,
+    auditId: auditRecord.id,
+    lineItemIdByPosName,
   };
 }

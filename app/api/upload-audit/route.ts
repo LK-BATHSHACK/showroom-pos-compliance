@@ -86,14 +86,22 @@ export async function POST(req: NextRequest) {
 
     // Any "not on this list" / "other support" free text that came with a
     // Microsoft Forms response becomes a POS Request, same as if it had
-    // been typed into the app's own Submit New Idea form - so it lands in
-    // your existing approve/decline review flow rather than getting lost.
+    // been typed into the app's own Submit a POS Request form - so it lands
+    // in your existing approve/decline review flow rather than getting
+    // lost. Both of the real form's two free-text questions are covered:
+    // Q29 "anything not on this list" -> New Idea, Q30 "other support or
+    // replacement assets" -> Replacement/Support Request. Q30 used to ONLY
+    // land in the Audit's own SupportRequiredDetails field with no visible
+    // Request created at all - fixed 31 Aug 2026 alongside the in-tool POS
+    // Walkaround form gaining the same split, per Lorraine's "POS request
+    // and submit new idea are different things".
     let newIdeasLogged = 0;
+    let supportRequestsLogged = 0;
     for (const parsed of parsedAudits) {
-      if (!parsed.newIdeaText) continue;
       const showroom = ctx.showroomsByNormalizedName.get(parsed.showroomName.toLowerCase().trim());
-      await createRecords(TABLES.POS_REQUESTS, [
-        {
+      const requestsToCreate: Record<string, any>[] = [];
+      if (parsed.newIdeaText) {
+        requestsToCreate.push({
           Showroom: showroom ? [showroom.id] : [],
           RequesterName: parsed.completedByName || "",
           RequesterEmail: parsed.completedByEmail || "",
@@ -105,10 +113,27 @@ export async function POST(req: NextRequest) {
           ProductCategory: "",
           Urgency: "Medium",
           OtherShowroomsMayBenefit: false,
+          RequestType: "New Idea",
           Status: "Submitted",
-        },
-      ]);
-      newIdeasLogged++;
+        });
+      }
+      if (parsed.supportDetails) {
+        requestsToCreate.push({
+          Showroom: showroom ? [showroom.id] : [],
+          RequesterName: parsed.completedByName || "",
+          RequesterEmail: parsed.completedByEmail || "",
+          RequestDate: parsed.auditDate || new Date().toISOString().slice(0, 10),
+          IdeaDescription: parsed.supportDetails,
+          Urgency: "Medium",
+          RequestType: "Replacement/Support Request",
+          Status: "Submitted",
+        });
+      }
+      if (requestsToCreate.length) {
+        await createRecords(TABLES.POS_REQUESTS, requestsToCreate);
+        if (parsed.newIdeaText) newIdeasLogged++;
+        if (parsed.supportDetails) supportRequestsLogged++;
+      }
     }
 
     const ok = results.filter((r): r is Extract<ProcessedAuditResult, { ok: true }> => r.ok);
@@ -142,7 +167,8 @@ export async function POST(req: NextRequest) {
              <thead><tr style="text-align:left; color:#6E6E6E;"><th style="padding:4px 8px;">Showroom</th><th style="padding:4px 8px;">RAG</th><th style="padding:4px 8px;">Score</th><th style="padding:4px 8px;">Actions created</th><th style="padding:4px 8px;">Actions verified fixed</th></tr></thead>
              <tbody>${rows}${errorRows}</tbody>
            </table>
-           ${newIdeasLogged ? `<p>${newIdeasLogged} new POS idea${newIdeasLogged === 1 ? "" : "s"} logged for review in POS Requests.</p>` : ""}`
+           ${newIdeasLogged ? `<p>${newIdeasLogged} new POS idea${newIdeasLogged === 1 ? "" : "s"} logged for review in POS Requests.</p>` : ""}
+           ${supportRequestsLogged ? `<p>${supportRequestsLogged} replacement/support request${supportRequestsLogged === 1 ? "" : "s"} logged for review in POS Requests.</p>` : ""}`
         )
       );
     }
@@ -181,6 +207,7 @@ export async function POST(req: NextRequest) {
       results: ok.map((r) => ({ showroom: r.showroomName, score: r.score, rag: r.rag, actionsCreated: r.actionsCreated, actionsVerified: r.actionsVerified, breakdown: r.breakdown })),
       errors: allErrors,
       newIdeasLogged,
+      supportRequestsLogged,
     });
   } catch (err: any) {
     console.error(err);

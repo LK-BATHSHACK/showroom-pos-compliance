@@ -1,18 +1,24 @@
 "use client";
 import { useState } from "react";
 import Link from "next/link";
-import { PriorityBadge, AuditTypeBadge } from "./ui";
+import { PriorityBadge, SourceTypeBadge } from "./ui";
 
 export default function ActionRow({
   action,
   showroomId,
   showroomName,
-  auditType,
+  source,
+  foundVia,
 }: {
   action: any;
   showroomId?: string;
   showroomName: string;
-  auditType?: string;
+  // "POS" | "H&S" | "Other" - see app/actions/page.tsx's classification.
+  source?: string;
+  // Pre-built badge for whichever checklist type raised this action
+  // (AuditTypeBadge for POS, HSFoundViaBadge for H&S) - built by the
+  // caller so this component doesn't need to know about either.
+  foundVia?: React.ReactNode;
 }) {
   const [status, setStatus] = useState<string>(action.fields.Status);
   const [busy, setBusy] = useState(false);
@@ -46,8 +52,9 @@ export default function ActionRow({
           showroomName
         )}
       </td>
+      <td><SourceTypeBadge source={source} /></td>
       <td style={{ maxWidth: 320 }}>{action.fields.IssueDescription}</td>
-      <td>{auditType ? <AuditTypeBadge auditType={auditType} /> : "-"}</td>
+      <td>{foundVia || "-"}</td>
       <td><PriorityBadge priority={action.fields.Priority} /></td>
       <td>{status}</td>
       <td>{action.fields.DateIdentified}</td>
