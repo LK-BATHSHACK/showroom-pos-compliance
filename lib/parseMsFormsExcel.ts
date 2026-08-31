@@ -23,11 +23,26 @@ import { ParsedAudit, ParsedLineItem, inferConditionStatus } from "./parsedAudit
 //   they're simply not checked via this path, same as any other item a
 //   given form skips (computeAuditScore doesn't penalise for items with
 //   no data).
-// - "Duck Sale Wobblers" and "A3 Sale Posters & Displays" are ambiguous
-//   against the catalogue's near-duplicate item names - best guesses
-//   below, worth Jordan double-checking against what he meant.
+// - "Duck Sale Wobblers" and "A3 Sale Posters & Displays" - RESOLVED 31 Aug
+//   2026 against the real live form (Lorraine sent the exported question
+//   list, since forms.cloud.microsoft can't be fetched directly):
+//     - Q8 "Duck Sale Wobblers - Do you have enough? (min. 10)" is about
+//       wobblers, not stickers - maps to "Sale Wobbler Ducks", not "Duck
+//       Stickers (General)" as previously guessed.
+//     - Q10 "A3 Sale Posters & Displays - Do you have enough?" turned out
+//       to be ONE question covering TWO catalogue items at once ("Monthly
+//       Sale Posters (A3)" and "A3 Clear Sale Frames"), with a 3-way
+//       answer that does distinguish which is short ("We need more
+//       posters" vs "We need more displays"). Handled below via
+//       `multiPosName` rather than a single `posName`, so each half scores
+//       against the right catalogue item instead of only one of them ever
+//       getting data from this form.
 
-type Mapping = { match: RegExp; posName: string } | { match: RegExp; photoForPosName: string } | { match: RegExp; special: string };
+type Mapping =
+  | { match: RegExp; posName: string }
+  | { match: RegExp; multiPosName: { name: string; missingWhen: RegExp }[] }
+  | { match: RegExp; photoForPosName: string }
+  | { match: RegExp; special: string };
 
 const MAPPINGS: Mapping[] = [
   { match: /which showroom/i, special: "showroom" },
@@ -38,9 +53,17 @@ const MAPPINGS: Mapping[] = [
   { match: /tile samples.*label/i, posName: "Tile Pricing Stickers" },
   { match: /image showing tile labels/i, photoForPosName: "Tile Pricing Stickers" },
   { match: /numbered duck sticker/i, posName: "Bay Number Duck Stickers" },
-  { match: /duck sale wobblers/i, posName: "Duck Stickers (General)" }, // best guess - name overlaps "Sale Wobbler Ducks"
+  { match: /duck sale wobblers/i, posName: "Sale Wobbler Ducks" }, // confirmed 31 Aug 2026 against the real form (Q8, "min. 10" wobblers)
   { match: /star wobblers/i, posName: "Star Wobblers" },
-  { match: /a3 sale posters/i, posName: "Monthly Sale Posters (A3)" }, // best guess - overlaps "A3 Clear Sale Frames"
+  {
+    // confirmed 31 Aug 2026 against the real form (Q10) - one question, two
+    // catalogue items, answer text distinguishes which is short.
+    match: /a3 sale posters & displays/i,
+    multiPosName: [
+      { name: "Monthly Sale Posters (A3)", missingWhen: /need more posters/i },
+      { name: "A3 Clear Sale Frames", missingWhen: /need more displays/i },
+    ],
+  },
   { match: /a1 frame and easel/i, posName: "Showroom Exclusives A1 Frame & Easel" },
   { match: /awards displayed at each terminal/i, posName: "Framed Awards" },
   { match: /trustpilot poster\/sign/i, posName: "Trustpilot Poster (A3)" },
@@ -131,6 +154,22 @@ export function parseMsFormsExcel(buffer: Buffer): ParsedAudit[] {
             posName: m.posName,
             conditionStatus: status,
             comments: raw,
+          });
+        }
+      } else if ("multiPosName" in m) {
+        // One question, several catalogue items - each sub-item's own
+        // regex decides whether the answer flagged it specifically as
+        // short; anything answered but not flagged is Present-OK rather
+        // than left with no data, since the respondent did address it.
+        if (!raw) continue;
+        for (const sub of m.multiPosName) {
+          const status = sub.missingWhen.test(raw) ? "Missing" : "Present-OK";
+          const canonical = require("./parsedAudit").CANONICAL_POS_ITEMS.find((c: any) => c.name === sub.name);
+          lineItems.push({
+            category: canonical?.category || "",
+            posName: sub.name,
+            conditionStatus: status,
+            comments: status === "Missing" ? raw : "",
           });
         }
       }

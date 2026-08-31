@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { updateRecords, getRecord, TABLES } from "@/lib/airtable";
 import { sendEmail, emailShell } from "@/lib/resend";
+import { requireRole } from "@/lib/auth";
 
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
+  const session = await requireRole(["Admin", "Marketing"]);
+  if (!session) return NextResponse.json({ error: "Forbidden." }, { status: 403 });
+
   try {
     const { status, marketingComments, decisionByName } = await req.json();
     const today = new Date().toISOString().slice(0, 10);

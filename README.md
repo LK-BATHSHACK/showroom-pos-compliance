@@ -31,19 +31,34 @@ auto-detects which format a file is by sheet shape, not filename:
    Template instead was wrong - this format had been switched off in the
    upload route (see git history) and was re-enabled once that was
    clarified.
-   - **Known gap - showroom name mismatch**: the NI tab's "Belfast" and
-     "Tileshack Huttons" columns don't match any name in the live Airtable
-     Showrooms table (13 rows, none named either of those) - any data
-     entered under them will come back as a per-showroom error
-     ("Showroom ... wasn't found in Airtable") rather than being silently
-     dropped, but it needs resolving with Jordan/Lorraine: are these old
-     names for two of the 13 existing showrooms, or genuinely missing
-     showroom rows?
-   - **Known gap - coverage**: Shore Rd., Dargan, and Lurgan are tagged
-     `AuditGroup = Group A` in Airtable but don't appear as columns in
-     either tracker tab at all - worth confirming whether Jordan's real
-     round actually covers them (under a different name?) or whether
-     they're being missed by this tracker entirely.
+   - **Resolved 31 Aug 2026 - "Tileshack Huttons" is Shore Rd.** (full name
+     "Shore Road - Tileshack"), confirmed by Lorraine - not a separate or
+     missing showroom. `parseSpotCheckExcel.ts` now aliases this column
+     name to "Shore Rd." at parse time (`SHOWROOM_NAME_ALIASES`), so it
+     resolves to the real Airtable showroom instead of erroring. This also
+     closes out what had been logged as a coverage gap for Shore Rd. - it
+     was never missing from the tracker, just present under this column
+     name.
+   - **Resolved 31 Aug 2026 - "Belfast" is Dargan**, confirmed by Lorraine -
+     same pattern as Tileshack Huttons/Shore Rd., an old/informal column
+     name for an existing Airtable showroom rather than a missing one.
+     `parseSpotCheckExcel.ts` now aliases "Belfast" to "Dargan"
+     (`SHOWROOM_NAME_ALIASES`). This closes out the Dargan half of the
+     coverage gap below.
+   - **Resolved 31 Aug 2026 - Lurgan added as a column.** Lurgan was
+     tagged `AuditGroup = Group A` in Airtable but genuinely didn't appear
+     anywhere in the tracker - not a naming mismatch like the two above,
+     an actual missing column. Added a "Lurgan" column (mirroring the
+     other showroom columns' structure and defaults) to both the
+     evergreen "NI" template tab and the current "NI - Aug 2026" tab of
+     Jordan's real tracker file, via direct XML surgery on the existing
+     workbook per this project's Excel-editing standard (never round-trip
+     an existing xlsx through a general-purpose Excel library) - verified
+     well-formed and diffed against the original to confirm only the two
+     worksheet parts changed. Updated file delivered to Lorraine to
+     replace the version Jordan's using. With both this and the Belfast/
+     Dargan alias, the NI/ROI tracker's showroom-name coverage now
+     matches the live Airtable Showrooms table with no open gaps.
    - **Important operational caveat**: this format has no per-showroom
      "visited" signal - a showroom Jordan hasn't gotten to yet this month
      looks IDENTICAL to one he's checked and found fully compliant, because
@@ -69,11 +84,24 @@ auto-detects which format a file is by sheet shape, not filename:
    "everything in one file" options that both claim to do the same job.
 4. **Microsoft Forms export** - every showroom's monthly self-report
    (`lib/parseMsFormsExcel.ts`) - one row per response, matched by column
-   headers rather than position. Two mappings are best-guesses worth Jordan
-   double-checking: "Duck Sale Wobblers" -> Duck Stickers (General), and
-   "A3 Sale Posters & Displays" -> Monthly Sale Posters (A3) - both overlap
-   a near-duplicate catalogue item name. The "not on this list" and "other
-   support" free-text questions auto-create a POS Request if answered.
+   headers rather than position. Two mappings were previously best-guesses;
+   **resolved 31 Aug 2026** against the real live form (Lorraine sent the
+   exported question list, since forms.cloud.microsoft can't be fetched
+   directly by this tool):
+   - "Duck Sale Wobblers" (Q8, "min. 10" wobblers) actually maps to "Sale
+     Wobbler Ducks", not "Duck Stickers (General)" as originally guessed -
+     fixed.
+   - "A3 Sale Posters & Displays" (Q10) turned out to be one question
+     covering *two* catalogue items at once ("Monthly Sale Posters (A3)"
+     and "A3 Clear Sale Frames"), with a 3-way answer that does
+     distinguish which is short ("We need more posters" vs "We need more
+     displays"). Previously only "Monthly Sale Posters (A3)" ever got data
+     from this question, and a "need more displays" answer would have
+     wrongly flagged the posters instead of the frames. Fixed via a new
+     `multiPosName` mapping type that splits the one answer across both
+     catalogue items correctly.
+   The "not on this list" and "other support" free-text questions
+   auto-create a POS Request if answered.
 
 Any batch upload (a Microsoft Forms export with multiple responses, or a
 multi-tab round file with multiple filled-in showrooms) sends ONE
@@ -104,6 +132,18 @@ problem like this shows up in Vercel's function logs instead of vanishing.
 `DESIGNER_NOTIFY_EMAIL` in Vercel (Project Settings -> Environment
 Variables) - it's currently unset on the live project, so designer
 notification emails are silently skipped by design until it's added.
+**Value confirmed 31 Aug 2026 by Lorraine: `jordan.mckee@bathshack.com`**
+- someone with Vercel project access needs to add it there since this
+tool can't set Vercel env vars directly.
+
+**Bug fixed 31 Aug 2026, found while screenshotting the app for Lorraine**: the
+Submit Audit page's on-screen copy told users "the old multi-showroom Spot
+Check workbook is no longer used" - directly wrong, since that's the NI/ROI
+tracker format re-enabled back on 14 Aug 2026 and actively fixed twice more
+in this same session (Tileshack Huttons/Shore Rd., Belfast/Dargan, Lurgan).
+The upload logic itself was always correct (`isSpotCheckWorkbook` is live in
+`app/api/upload-audit/route.ts`) - only the page's descriptive text was
+stale. Fixed in `app/upload/page.tsx`.
 
 **Airtable follow-up needed**: three POS Master Catalogue items were added
 to the code on 14 Aug 2026 (to match everything the Microsoft Form checks) -

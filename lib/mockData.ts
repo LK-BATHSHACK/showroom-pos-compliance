@@ -1,8 +1,14 @@
 // In-memory mock data layer used ONLY for local preview when PREVIEW_MODE=1.
-// Lets the app run end-to-end (dashboard, drill-downs, actions, requests,
-// approve/decline, new-request submission) without a real Airtable base.
-// Not used at all in production - lib/airtable.ts only calls into this when
-// the PREVIEW_MODE env var is explicitly set.
+// Lets the app run end-to-end without a real Airtable base or Vercel
+// deployment - both the original POS pages (dashboard, drill-downs, actions,
+// requests, approve/decline, new-request submission) and, as of 31 Aug 2026,
+// login and the H&S Walkaround flow (Users/Sites/Checklist Templates/
+// Template Questions/Rosters/Submissions/Answers - see below). Not used at
+// all in production - lib/airtable.ts only calls into this when the
+// PREVIEW_MODE env var is explicitly set. To try it locally:
+//   PREVIEW_MODE=1 SESSION_SECRET=dev npm run dev
+// then sign in as any of the four seeded preview accounts below (password
+// "Preview123!" for all of them).
 
 import { TABLES } from "./airtable";
 
@@ -288,6 +294,146 @@ const settings: Rec[] = [
 
 const auditLineItems: Rec[] = [];
 
+// ---------------------------------------------------------------------------
+// Generalised compliance-tool tables (Users/Sites/Checklist Templates/
+// Template Questions/Rosters/Submissions/Answers) - added so PREVIEW_MODE
+// covers login and the H&S Walkaround flow, not just the old POS pages.
+//
+// Template Questions is a REPRESENTATIVE SUBSET of the real 65-question H&S
+// checklist (~26 questions), not the full set - chosen to exercise every
+// answer type (short/long text, date, yes/no, single/multiple choice,
+// matrix, file upload) and every special-case code path in
+// lib/hsSubmission.ts (roster mismatches, immediate escalation, explicit
+// issue fields, training/risk-assessment requests, SiteType and NamedSites
+// scoping). Question text/options/scoping below is copied verbatim from the
+// real Template Questions table in Airtable (base appCJQDoT7p1FJY5Q, 31 Aug
+// 2026) - this is a smaller preview-only copy of real rows, not invented
+// text. Full-fidelity (all 65) wasn't worth the transcription effort for a
+// local demo aid that's never used in production.
+// ---------------------------------------------------------------------------
+
+const siteSeed: { name: string; siteType: string; region: string; pos: boolean; hs: boolean }[] = [
+  { name: "Boucher", siteType: "Showroom", region: "NI", pos: true, hs: true },
+  { name: "Shore Rd.", siteType: "Showroom", region: "NI", pos: true, hs: true },
+  { name: "Dargan Showroom", siteType: "Showroom", region: "NI", pos: true, hs: true },
+  { name: "Antrim Showroom", siteType: "Showroom", region: "NI", pos: true, hs: true },
+  { name: "Antrim Warehouse & Offices", siteType: "Warehouse", region: "NI", pos: false, hs: true },
+  { name: "Cork Showroom", siteType: "Showroom", region: "ROI", pos: true, hs: true },
+  { name: "Dublin Showroom", siteType: "Showroom", region: "ROI", pos: true, hs: true },
+  { name: "Cheadle", siteType: "Showroom", region: "GB", pos: true, hs: true },
+];
+
+const sites: Rec[] = siteSeed.map((s) => ({
+  id: nextId("sit"),
+  createdTime: "2026-08-31T09:00:00.000Z",
+  fields: {
+    SiteName: s.name,
+    SiteType: s.siteType,
+    Region: s.region,
+    Active: true,
+    POSChecklistApplies: s.pos,
+    "H&SChecklistApplies": s.hs,
+  },
+}));
+
+const siteByName = (n: string) => sites.find((s) => s.fields.SiteName === n)!;
+
+const checklistTemplates: Rec[] = [
+  { id: nextId("tpl"), createdTime: "2026-08-31T09:00:00.000Z", fields: { TemplateName: "POS Compliance", Version: 1, Status: "Active", ScoringModel: "Weighted score (100pt)" } },
+  { id: nextId("tpl"), createdTime: "2026-08-31T09:00:00.000Z", fields: { TemplateName: "H&S Walkaround", Version: 1, Status: "Active", ScoringModel: "Pass/fail with escalation" } },
+];
+const hsTemplateId = checklistTemplates[1].id;
+
+type QSeed = {
+  qnum: number;
+  section: string;
+  order: number;
+  text: string;
+  answerType: string;
+  options?: string;
+  required?: boolean;
+  scopeType?: "AllSites" | "SiteType" | "NamedSites";
+  scopeSiteType?: string;
+  scopeSiteNames?: string[];
+  rosterRole?: string;
+  urgency?: "Digest" | "Immediate";
+};
+
+const hsQuestionSeed: QSeed[] = [
+  { qnum: 1, section: "General Information", order: 1, text: "Person completing inspection", answerType: "Short answer", required: true },
+  { qnum: 2, section: "General Information", order: 2, text: "Date of inspection", answerType: "Date", required: true },
+  { qnum: 4, section: "General Information", order: 4, text: "For Antrim Warehouse ONLY - Has your racking inspection led to any requirements for change? (please note changes due/planned)", answerType: "Short answer", required: true, scopeType: "NamedSites", scopeSiteNames: ["Antrim Warehouse & Offices"] },
+  { qnum: 5, section: "Warehouse Section Only", order: 5, text: "Material handling and storage — rate each of the following", answerType: "Matrix", options: "Is shelving/racking maintained in good condition?; Is a Safe Working Load sticker displayed where required?; Is lifting equipment (e.g. forklift trucks) in good condition and inspected in date?", required: true, scopeType: "SiteType", scopeSiteType: "Warehouse" },
+  { qnum: 6, section: "Warehouse Section Only", order: 6, text: "Does your site have any LOLER equipment (i.e. forklift, reach truck etc)?", answerType: "Yes/No", required: true, scopeType: "SiteType", scopeSiteType: "Warehouse" },
+  { qnum: 9, section: "Warehouse Section Only", order: 9, text: "Report any issues here with anything warehouse related", answerType: "Long answer", options: "n/a if no issues", scopeType: "SiteType", scopeSiteType: "Warehouse" },
+  { qnum: 11, section: "Posters, Visuals & Documents", order: 11, text: "Is this poster displayed in your site location - and does it have ALL the same reps on it (Justin, Ashley, Gavin and Chloe)?", answerType: "Single choice", options: "Yes; Report issue/Order Replacement", required: true, rosterRole: "H&S Rep" },
+  { qnum: 13, section: "Posters, Visuals & Documents", order: 13, text: "Report any issues here", answerType: "Long answer", options: "n/a if no issues" },
+  { qnum: 14, section: "Welfare Facilities", order: 14, text: "Do your staff members have access to: working toilets and wash-hand basins with soap and drying facilities; drinking water; a place to store clothing (and somewhere to change if special clothing is worn for work); somewhere to rest and eat meals if appropriate; sanitary disposal bin (please check customer and employee toilets)", answerType: "Yes/No", options: "Yes Report issue", required: true },
+  { qnum: 17, section: "Welfare Facilities", order: 17, text: "Report issue here", answerType: "Short answer", required: true },
+  { qnum: 18, section: "Manual Handling", order: 18, text: "All staff on site have completed the Academy Manual Handling Course. (If no, please ensure this is completed by the next monthly check.)", answerType: "Yes/No" },
+  { qnum: 26, section: "Hazards & Housekeeping Standards", order: 26, text: "Report issue here", answerType: "Short answer" },
+  { qnum: 31, section: "Fire Warden Checklist", order: 31, text: "Who is the Fire Warden at your site? (Please ensure the poster has their name on it.)", answerType: "Short answer" },
+  { qnum: 35, section: "Fire Warden Checklist", order: 35, text: "Fire Warden Duties - please work with your fire warden to ensure all the below have been checked. Any items ticked 'No' must be referenced/reported in the next question.", answerType: "Matrix", options: "Fire Action Notices are displayed at Manual Call points and first exit doors; All fire safety equipment, fire hoses and fire extinguishers are in position, undamaged, and classified (all tamper tags intact); Fire doors in good condition (satisfying all strips, closers, push pads and push bars); A fire evacuation plan (to assembly point) is on the wall and visible", required: true },
+  { qnum: 40, section: "Fire Warden Checklist", order: 40, text: "Report any issues here", answerType: "Long answer", options: "n/a if no issues" },
+  { qnum: 41, section: "First Aid", order: 41, text: "Who is the first aid appointed person on site? (check their certificate is in date via the training section on Breathe; ensure their name is on the poster)", answerType: "Short answer", required: true },
+  { qnum: 50, section: "First Aid", order: 50, text: "Report any issues here", answerType: "Long answer", options: "n/a if no issues" },
+  { qnum: 51, section: "Mental Health First Aid", order: 51, text: "This poster is displayed on site (check the toilet doors, it may be there). Current MHFAs are Chris, Salli and Julia Kerr - please update the poster accordingly.", answerType: "Single choice", options: "I've had a new poster sent to me with the correct names on (Salli, Chris and Julia); I will print off a new version now (find it in the transport chat group on Teams); Missing poster - no printer on site, please send me one", required: true, rosterRole: "Mental Health First Aider" },
+  { qnum: 53, section: "Accidents, Incidents or Near Misses", order: 53, text: "Have any accidents/incidents or near misses happened in the last month? (check the accident/incident log or completed near miss sheets - STOP REPORT ACTION sheets)", answerType: "Single choice", options: "Yes - please upload a photo of any new and completed accident/incident/fire log or near miss book pages since the last checklist completion immediately to Salli; No", required: true, urgency: "Immediate" },
+  { qnum: 54, section: "Accidents, Incidents or Near Misses", order: 54, text: "How many Accidents, Incidents or Near Miss reports will you be emailing to Salli for this month?", answerType: "Single choice", options: "0; 1; 2; 3; More than 3", required: true, urgency: "Immediate" },
+  { qnum: 57, section: "Security", order: 57, text: "Report any issues here", answerType: "Long answer", options: "n/a if no issues" },
+  { qnum: 58, section: "Security", order: 58, text: "Is the EMERGENCY CONTACTS poster displayed on your noticeboard? (NEW)", answerType: "Single choice", options: "Yes, and it has Julia, Ryan and Ruaidhri on; Yes, and it has Gavin, Ryan and Ruaidhri on; No, please email me a copy to print; No, I don't have a printer, please post me a copy; WAREHOUSE - Not Required", rosterRole: "Emergency Contact" },
+  { qnum: 61, section: "And finally...", order: 61, text: "Have you added any new items to the Maintenance Task Planner this month? (we will check they have been logged and are under review; please be specific about what you've added if it's not obvious)", answerType: "Short answer" },
+  { qnum: 62, section: "And finally...", order: 62, text: "Please upload photos of any issues you've reported for maintenance to review for prioritising", answerType: "File upload", options: "Max 10 files, 10MB each. Allowed: Word, Excel, PPT, PDF, image, video, audio" },
+  { qnum: 63, section: "And finally...", order: 63, text: "I need to request training for...", answerType: "Single choice", options: "First Aider on site (for larger sites); First aid appointed person training (suitable for most showrooms); Fire Warden" },
+  { qnum: 65, section: "And finally...", order: 65, text: "I need a specific risk assessment (please choose a reason)", answerType: "Multiple choice (checkboxes)", options: "Not Required; New expectant mother on site; New young person (under 18) working on site; Recent serious accident or near miss; A pattern of accidents or near misses; Introduction of new equipment; Process changes; New information about a hazard; Regular Lone Working; Other", required: true },
+];
+
+const templateQuestions: Rec[] = hsQuestionSeed.map((q) => ({
+  id: nextId("tq"),
+  createdTime: "2026-08-31T09:00:00.000Z",
+  fields: {
+    QuestionText: q.text,
+    Template: [hsTemplateId],
+    Section: q.section,
+    OrderIndex: q.order,
+    QuestionNumber: q.qnum,
+    AnswerType: q.answerType,
+    OptionsNotes: q.options || undefined,
+    Required: !!q.required,
+    ScopeType: q.scopeType || "AllSites",
+    ScopeSiteType: q.scopeSiteType || undefined,
+    ScopeSites: q.scopeSiteNames ? q.scopeSiteNames.map((n) => siteByName(n).id) : [],
+    RosterRole: q.rosterRole || undefined,
+    UrgencyClass: q.urgency || "Digest",
+  },
+}));
+
+const tqByQnum = (n: number) => templateQuestions.find((t) => t.fields.QuestionNumber === n)!;
+
+const rosters: Rec[] = [
+  { id: nextId("ros"), createdTime: "2026-08-31T09:00:00.000Z", fields: { RosterName: "H&S Reps - Company-wide", Role: "H&S Rep", Scope: "Company-wide", Names: "Justin, Ashley, Gavin, Chloe", TemplateQuestions: [tqByQnum(11).id], Confirmed: false } },
+  { id: nextId("ros"), createdTime: "2026-08-31T09:00:00.000Z", fields: { RosterName: "Mental Health First Aiders - Company-wide", Role: "Mental Health First Aider", Scope: "Company-wide", Names: "Chris, Salli, Julia Kerr", TemplateQuestions: [tqByQnum(51).id], Confirmed: false } },
+  { id: nextId("ros"), createdTime: "2026-08-31T09:00:00.000Z", fields: { RosterName: "Emergency Contacts - NI", Role: "Emergency Contact", Scope: "Region", Region: "NI", Names: "Julia, Ryan, Ruaidhri", TemplateQuestions: [tqByQnum(58).id], Confirmed: true } },
+  { id: nextId("ros"), createdTime: "2026-08-31T09:00:00.000Z", fields: { RosterName: "Emergency Contacts - ROI", Role: "Emergency Contact", Scope: "Region", Region: "ROI", Names: "Gavin, Ryan, Ruaidhri", TemplateQuestions: [tqByQnum(58).id], Confirmed: true } },
+  { id: nextId("ros"), createdTime: "2026-08-31T09:00:00.000Z", fields: { RosterName: "Emergency Contacts - GB", Role: "Emergency Contact", Scope: "Region", Region: "GB", Names: "Clint Heaton", TemplateQuestions: [tqByQnum(58).id], Confirmed: true } },
+];
+
+// Preview-only synthetic accounts, one per role - NOT real Bathshack
+// credentials. Password for all four is "Preview123!" (hash precomputed
+// with the same PBKDF2 settings as lib/auth.ts, 210,000 iterations). Only
+// reachable when PREVIEW_MODE=1, which is never set in production.
+const PREVIEW_PASSWORD_HASH = "pbkdf2$210000$4vyximw18nP8JMgxZZpJ5g==$GENnjdNKuEJC1kJOv6WwGID+6hF20UWdWyxzKX2Mqmw=";
+
+const users: Rec[] = [
+  { id: nextId("usr"), createdTime: "2026-08-31T09:00:00.000Z", fields: { Name: "Preview Admin", Email: "preview.admin@bathshack.com", PasswordHash: PREVIEW_PASSWORD_HASH, Role: "Admin", Active: true, MustChangePassword: false } },
+  { id: nextId("usr"), createdTime: "2026-08-31T09:00:00.000Z", fields: { Name: "Preview Marketing", Email: "preview.marketing@bathshack.com", PasswordHash: PREVIEW_PASSWORD_HASH, Role: "Marketing", Active: true, MustChangePassword: false } },
+  { id: nextId("usr"), createdTime: "2026-08-31T09:00:00.000Z", fields: { Name: "Preview H&S", Email: "preview.hs@bathshack.com", PasswordHash: PREVIEW_PASSWORD_HASH, Role: "H&S", Active: true, MustChangePassword: false } },
+  { id: nextId("usr"), createdTime: "2026-08-31T09:00:00.000Z", fields: { Name: "Preview Store Manager", Email: "preview.storemanager@bathshack.com", PasswordHash: PREVIEW_PASSWORD_HASH, Role: "Store Manager", Site: [siteByName("Boucher").id], Active: true, MustChangePassword: false } },
+];
+
+const submissions: Rec[] = [];
+const answers: Rec[] = [];
+
 const store: Record<string, Rec[]> = {
   [TABLES.SETTINGS]: settings,
   [TABLES.SHOWROOMS]: showrooms,
@@ -296,6 +442,13 @@ const store: Record<string, Rec[]> = {
   [TABLES.AUDIT_LINE_ITEMS]: auditLineItems,
   [TABLES.ACTIONS]: actions,
   [TABLES.POS_REQUESTS]: posRequests,
+  [TABLES.USERS]: users,
+  [TABLES.SITES]: sites,
+  [TABLES.CHECKLIST_TEMPLATES]: checklistTemplates,
+  [TABLES.TEMPLATE_QUESTIONS]: templateQuestions,
+  [TABLES.ROSTERS]: rosters,
+  [TABLES.SUBMISSIONS]: submissions,
+  [TABLES.ANSWERS]: answers,
 };
 
 function tablePrefix(table: string) {
@@ -354,4 +507,23 @@ export function mockUpdateRecords(table: string, records: { id: string; fields: 
     }
   });
   return Promise.resolve(updated);
+}
+
+// Preview-mode stand-in for lib/airtable.ts's uploadAttachment() - doesn't
+// actually store file bytes anywhere (no blob storage in this mock layer),
+// just records that an attachment "landed" on the field so the H&S
+// Walkaround flow can be exercised end-to-end locally, including the
+// photoUploadErrors path never firing. Finds the record across every table
+// rather than requiring a table name, since callers (submitHSWalkaround)
+// only have a record ID and field name at that point.
+export function mockUploadAttachment(recordId: string, fieldIdOrName: string, file: { filename: string; contentType: string; base64: string }) {
+  for (const table of Object.values(store)) {
+    const rec = table.find((r) => r.id === recordId);
+    if (rec) {
+      const existing: any[] = rec.fields[fieldIdOrName] || [];
+      rec.fields[fieldIdOrName] = [...existing, { id: nextId("att"), filename: file.filename, type: file.contentType, size: Math.round((file.base64.length * 3) / 4) }];
+      return Promise.resolve();
+    }
+  }
+  return Promise.resolve();
 }
