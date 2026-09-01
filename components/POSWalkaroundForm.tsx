@@ -353,6 +353,17 @@ function QuestionField({
     <div id={`q-${q.qnum}`} style={{ marginBottom: 22, paddingBottom: 4 }}>
       {label}
       {q.helpText && <div style={{ fontSize: 12, color: "#6E6E6E", marginBottom: 6 }}>{q.helpText}</div>}
+      {q.referenceImageUrl && (
+        <a href={q.referenceImageUrl} target="_blank" rel="noopener noreferrer" style={{ display: "inline-block", marginBottom: 10 }}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={q.referenceImageUrl}
+            alt={`What this should look like - ${q.text}`}
+            style={{ width: 110, height: 110, objectFit: "cover", borderRadius: 6, border: "1px solid #ddd", display: "block" }}
+          />
+          <div style={{ fontSize: 11, color: "#3348B0", marginTop: 3 }}>What this should look like</div>
+        </a>
+      )}
       {field}
       {error && <div style={{ color: "#d03b3b", fontSize: 12, marginTop: 4 }}>{error}</div>}
     </div>

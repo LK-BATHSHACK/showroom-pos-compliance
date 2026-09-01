@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireRole, hashPassword, generateTempPassword } from "@/lib/auth";
-import { listRecords, createRecords, updateRecords, TABLES } from "@/lib/airtable";
+import { listRecords, createRecords, updateRecords, deleteRecords, TABLES } from "@/lib/airtable";
 
 type UserFields = {
   Name: string;
@@ -30,7 +30,12 @@ export async function GET() {
       role: u.fields.Role,
       siteId: u.fields.Site?.[0] || null,
       siteName: siteName(u.fields.Site?.[0]),
-      active: u.fields.Active !== false,
+      // NOT `!== false` - Airtable's checkbox fields omit themselves from the
+      // record entirely when unchecked (there's no stored `false`), so a
+      // disabled user's Active field comes back as undefined, not false.
+      // `!== false` was reading that as "still active" - the actual bug
+      // behind "Disable doesn't work" (found + fixed 1 Sep 2026).
+      active: u.fields.Active === true,
       mustChangePassword: !!u.fields.MustChangePassword,
       lastLoginAt: u.fields.LastLoginAt || null,
     })),
@@ -84,6 +89,12 @@ export async function PATCH(req: NextRequest) {
   const { id, role, siteId, active, resetPassword } = await req.json();
   if (!id) return NextResponse.json({ error: "Missing id." }, { status: 400 });
 
+  // Stop an Admin disabling their own only-active account and locking
+  // themselves out with no other Admin left to re-enable it.
+  if (active === false && id === session.uid) {
+    return NextResponse.json({ error: "You can't disable your own account." }, { status: 400 });
+  }
+
   const fields: Record<string, any> = {};
   if (role) fields.Role = role;
   if (siteId !== undefined) fields.Site = siteId ? [siteId] : [];
@@ -98,4 +109,21 @@ export async function PATCH(req: NextRequest) {
 
   await updateRecords(TABLES.USERS, [{ id, fields }]);
   return NextResponse.json({ success: true, tempPassword });
+}
+
+export async function DELETE(req: NextRequest) {
+  const session = await requireRole(["Admin"]);
+  if (!session) return NextResponse.json({ error: "Forbidden." }, { status: 403 });
+
+  const { id } = await req.json();
+  if (!id) return NextResponse.json({ error: "Missing id." }, { status: 400 });
+
+  // Same reasoning as the self-disable guard above - permanently deleting
+  // your own account would leave nobody able to log in and undo it.
+  if (id === session.uid) {
+    return NextResponse.json({ error: "You can't delete your own account." }, { status: 400 });
+  }
+
+  await deleteRecords(TABLES.USERS, [id]);
+  return NextResponse.json({ success: true });
 }

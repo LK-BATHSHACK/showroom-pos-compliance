@@ -32,6 +32,15 @@ export type PosQuestion = {
   options?: string[];
   required?: boolean;
   helpText?: string;
+  // Reference photo shown next to the question so whoever's filling this in
+  // can see what "compliant" actually looks like - only the 8 questions
+  // that had one in the real Microsoft Form get one here (31 Aug 2026,
+  // Lorraine: "have the images been added that went with the questions?").
+  // Extracted from Showroom_POS_checklist.pdf and stored as static files
+  // rather than in Airtable's (currently empty) POS Master Catalogue
+  // ReferenceImage field, so they're guaranteed to render regardless of
+  // Airtable data state.
+  referenceImageUrl?: string;
 };
 
 // Q2 ("Which showroom are you reporting for?") is answered implicitly by
@@ -67,33 +76,33 @@ export const POS_WALKAROUND_QUESTIONS: PosQuestion[] = [
     "No - need frame",
     "No - need easel",
     "No - need plant",
-  ] },
-  { qnum: 12, section: "Sales POS", text: "Tile Specials Leaflets - do you have enough? (30x)", type: "radio", required: true, options: ["Yes - we have enough (30+)", "No - we need more"] },
+  ], referenceImageUrl: "/pos-reference/q11-showroom-exclusives-frame.jpg" },
+  { qnum: 12, section: "Sales POS", text: "Tile Specials Leaflets - do you have enough? (30x)", type: "radio", required: true, options: ["Yes - we have enough (30+)", "No - we need more"], referenceImageUrl: "/pos-reference/q12-tile-specials-leaflets.jpg" },
   { qnum: 13, section: "Sales POS", text: "Upload a photo of sales POS in action", type: "photo", helpText: "General evidence - doesn't need to be tied to one specific item." },
 
   { qnum: 14, section: "Customer-Facing Terminals", text: "Are 3x awards displayed at each terminal?", type: "radio", required: true, options: ["Yes", "No"] },
-  { qnum: 15, section: "Customer-Facing Terminals", text: "Trustpilot Poster/Sign - do you have enough? (4x)", type: "radio", required: true, options: ["Yes", "No"] },
+  { qnum: 15, section: "Customer-Facing Terminals", text: "Trustpilot Poster/Sign - do you have enough? (4x)", type: "radio", required: true, options: ["Yes", "No"], referenceImageUrl: "/pos-reference/q15-trustpilot-poster.jpg" },
   { qnum: 16, section: "Customer-Facing Terminals", text: "Price Promise Poster/Sign - do you have enough? (5x)", type: "radio", required: true, options: ["Yes", "No"] },
   { qnum: 17, section: "Customer-Facing Terminals", text: "QR code review cards & business cards - are both in place at every terminal?", type: "checkbox", required: true, options: [
     "Yes",
     "No - missing QR code review cards",
     "No - missing business cards",
   ] },
-  { qnum: 18, section: "Customer-Facing Terminals", text: "Is the Returns Policy Poster displayed?", type: "radio", required: true, options: ["Yes", "No"] },
+  { qnum: 18, section: "Customer-Facing Terminals", text: "Is the Returns Policy Poster displayed?", type: "radio", required: true, options: ["Yes", "No"], referenceImageUrl: "/pos-reference/q18-returns-policy-poster.jpg" },
   { qnum: 19, section: "Customer-Facing Terminals", text: "Upload a photo of a customer-facing terminal with correct POS", type: "photo", helpText: "General evidence - doesn't need to be tied to one specific item." },
 
-  { qnum: 20, section: "Rest of Showroom", text: "Trustpilot Review Tent Cards - do you have enough? (9x)", type: "radio", required: true, options: ["Yes", "No"] },
-  { qnum: 21, section: "Rest of Showroom", text: "Are Trustpilot Review Stickers displayed?", type: "radio", required: true, options: ["Yes", "No"] },
+  { qnum: 20, section: "Rest of Showroom", text: "Trustpilot Review Tent Cards - do you have enough? (9x)", type: "radio", required: true, options: ["Yes", "No"], referenceImageUrl: "/pos-reference/q20-trustpilot-tent-cards.jpg" },
+  { qnum: 21, section: "Rest of Showroom", text: "Are Trustpilot Review Stickers displayed?", type: "radio", required: true, options: ["Yes", "No"], referenceImageUrl: "/pos-reference/q21-trustpilot-stickers.jpg" },
   { qnum: 22, section: "Rest of Showroom", text: "Framed Bathroom Photos - do you have enough? (10x)", type: "radio", required: true, options: ["Yes", "No"] },
   { qnum: 23, section: "Rest of Showroom", text: "Is the Toilet Cleaning Rota up to date?", type: "radio", required: true, options: ["Yes", "No"] },
-  { qnum: 24, section: "Rest of Showroom", text: "Are toilet roll stickers in place?", type: "radio", required: true, options: ["Yes", "No"] },
+  { qnum: 24, section: "Rest of Showroom", text: "Are toilet roll stickers in place?", type: "radio", required: true, options: ["Yes", "No"], referenceImageUrl: "/pos-reference/q24-toilet-roll-stickers.jpg" },
   { qnum: 25, section: "Rest of Showroom", text: "Showroom scent - is everything present and topped up? (3x diffusers, 1x oil, 1x room spray)", type: "checkbox", required: true, options: [
     "Yes",
     "No - need diffuser(s)",
     "No - need oil",
     "No - need room spray",
   ] },
-  { qnum: 26, section: "Rest of Showroom", text: "Children Must Be Supervised Signs - do you have enough? (4x)", type: "radio", required: true, options: ["Yes", "No"] },
+  { qnum: 26, section: "Rest of Showroom", text: "Children Must Be Supervised Signs - do you have enough? (4x)", type: "radio", required: true, options: ["Yes", "No"], referenceImageUrl: "/pos-reference/q26-children-supervised-sign.jpg" },
   { qnum: 27, section: "Rest of Showroom", text: "Are the TV Slideshows working and up to date?", type: "radio", required: true, options: ["Yes", "No - support needed"] },
   { qnum: 28, section: "Rest of Showroom", text: "Upload 1-3 photos of general showroom POS in action", type: "photo", helpText: "General evidence - doesn't need to be tied to one specific item." },
 

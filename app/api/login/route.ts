@@ -28,7 +28,13 @@ export async function POST(req: NextRequest) {
   const users = await listRecords<UserFields>(TABLES.USERS);
   const match = users.find((u) => (u.fields.Email || "").toLowerCase() === String(email).toLowerCase());
 
-  if (!match || match.fields.Active === false || !match.fields.PasswordHash) {
+  // NOT `Active === false` - Airtable's checkbox fields omit themselves
+  // entirely from a record when unchecked (there's no stored `false`), so a
+  // disabled account's Active field comes back undefined here, not false -
+  // meaning this check never actually blocked a disabled account from
+  // logging in. Found + fixed 1 Sep 2026 alongside the same bug in the
+  // Users & Access "Disable" status display (app/api/admin/users/route.ts).
+  if (!match || match.fields.Active !== true || !match.fields.PasswordHash) {
     return NextResponse.json({ error: "Incorrect email or password." }, { status: 401 });
   }
   if (!verifyPassword(password, match.fields.PasswordHash)) {

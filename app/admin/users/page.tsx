@@ -12,8 +12,8 @@ export default async function AdminUsersPage() {
     <div>
       <h1 style={{ fontSize: 24, marginBottom: 4 }}>Users & Access</h1>
       <p style={{ color: "#6E6E6E", marginTop: 0, marginBottom: 24 }}>
-        Create and manage accounts. Store Manager accounts are locked to submitting H&S Walkarounds for their
-        assigned Site only; H&S and Marketing can see everything under H&S Review; Admin has full access.
+        Create and manage accounts. Store Manager accounts are locked to submitting POS Checks and H&S Checks for
+        their assigned Site only; H&S and Marketing can see everything under H&S Review; Admin has full access.
       </p>
       <UsersAdmin />
     </div>

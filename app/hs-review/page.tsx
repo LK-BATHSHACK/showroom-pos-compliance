@@ -52,11 +52,11 @@ export default async function HSReviewPage() {
     <div>
       <h1 style={{ fontSize: 24, marginBottom: 4 }}>H&S Review</h1>
       <p style={{ color: "#6E6E6E", marginTop: 0, marginBottom: 24 }}>
-        {hsSubmissions.length} walkaround{hsSubmissions.length === 1 ? "" : "s"} submitted so far.
+        {hsSubmissions.length} H&S check{hsSubmissions.length === 1 ? "" : "s"} submitted so far.
       </p>
 
       <div style={{ display: "flex", gap: 16, marginBottom: 24, flexWrap: "wrap" }}>
-        <KpiCard label="Walkarounds submitted" value={hsSubmissions.length} />
+        <KpiCard label="H&S checks submitted" value={hsSubmissions.length} />
         <KpiCard label="Open follow-up actions" value={openHsActions.length} />
         <KpiCard label="Roster/poster mismatches open" value={rosterMismatches.length} />
       </div>
@@ -85,7 +85,7 @@ export default async function HSReviewPage() {
               </tr>
             ))}
             {hsSubmissions.length === 0 && (
-              <tr><td colSpan={5} style={{ padding: "16px 4px", color: "#999" }}>No H&S Walkarounds submitted yet.</td></tr>
+              <tr><td colSpan={5} style={{ padding: "16px 4px", color: "#999" }}>No H&S checks submitted yet.</td></tr>
             )}
           </tbody>
         </table>

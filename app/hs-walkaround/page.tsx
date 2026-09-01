@@ -17,9 +17,9 @@ export default async function HSWalkaroundPage() {
 
   return (
     <div>
-      <h1 style={{ fontSize: 24, marginBottom: 4 }}>H&S Walkaround</h1>
+      <h1 style={{ fontSize: 24, marginBottom: 4 }}>H&S Check</h1>
       <p style={{ color: "#6E6E6E", marginTop: 0, marginBottom: 24 }}>
-        Monthly Health & Safety Walkaround checklist. Questions shown are scoped to the site you pick - warehouse-only
+        Monthly Health &amp; Safety checklist. Questions shown are scoped to the site you pick - warehouse-only
         and site-specific questions only appear where they apply.
       </p>
       <HSWalkaroundForm

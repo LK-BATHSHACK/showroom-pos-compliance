@@ -33,13 +33,19 @@ export default async function UploadPage() {
     }
   }
 
+  // Store Managers only ever see the in-tool checklist (no Excel tab), so
+  // their intro line shouldn't mention an "upload" option that isn't on the
+  // page in front of them (31 Aug 2026 - Lorraine: "update that copy so it
+  // makes sence for a showroom reading it").
+  const introCopy =
+    session.role === "Store Manager"
+      ? "Complete your showroom's monthly POS check below - it takes about 10 minutes and covers everything from window POS to till-point signage."
+      : "Fill out a POS check directly below, or - for Jordan's spot-check rounds - upload his completed workbook instead using the tab on the right.";
+
   return (
     <div>
-      <h1 style={{ fontSize: 24, marginBottom: 4 }}>Submit an Audit</h1>
-      <p style={{ color: "#6E6E6E", marginTop: 0, marginBottom: 20 }}>
-        Fill out the monthly POS checklist directly, or - for Jordan's spot-check rounds - upload the completed
-        workbook instead.
-      </p>
+      <h1 style={{ fontSize: 24, marginBottom: 4 }}>POS Check</h1>
+      <p style={{ color: "#6E6E6E", marginTop: 0, marginBottom: 20 }}>{introCopy}</p>
       <UploadTabs
         showrooms={showrooms}
         lockedShowroom={lockedShowroom}

@@ -519,6 +519,12 @@ export function mockUpdateRecords(table: string, records: { id: string; fields: 
   return Promise.resolve(updated);
 }
 
+export function mockDeleteRecords(table: string, ids: string[]) {
+  if (!store[table]) return Promise.resolve();
+  store[table] = store[table].filter((r) => !ids.includes(r.id));
+  return Promise.resolve();
+}
+
 // Preview-mode stand-in for lib/airtable.ts's uploadAttachment() - doesn't
 // actually store file bytes anywhere (no blob storage in this mock layer),
 // just records that an attachment "landed" on the field so the H&S

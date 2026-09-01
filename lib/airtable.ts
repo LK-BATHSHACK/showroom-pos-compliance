@@ -159,6 +159,29 @@ export async function updateRecords<T = Record<string, any>>(
   return updated;
 }
 
+/** Permanently deletes records, chunked into batches of 10 (Airtable's per-request limit). */
+export async function deleteRecords(table: string, ids: string[]): Promise<void> {
+  if (ids.length === 0) return;
+  if (PREVIEW_MODE) {
+    const { mockDeleteRecords } = await import("./mockData");
+    return mockDeleteRecords(table, ids);
+  }
+
+  for (let i = 0; i < ids.length; i += 10) {
+    const batch = ids.slice(i, i + 10);
+    const params = new URLSearchParams();
+    batch.forEach((id) => params.append("records[]", id));
+    const res = await fetch(`${tableUrl(table)}?${params.toString()}`, {
+      method: "DELETE",
+      headers: headers(),
+    });
+    if (!res.ok) {
+      const body = await res.text();
+      throw new Error(`Airtable delete "${table}" failed (${res.status}): ${body}`);
+    }
+  }
+}
+
 export type AttachmentUpload = { filename: string; contentType: string; base64: string };
 
 // Airtable's own hard limit is 5MB per file on this endpoint - kept as a

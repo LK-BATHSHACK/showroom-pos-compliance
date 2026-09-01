@@ -27,6 +27,7 @@ export default function UsersAdmin() {
   const [form, setForm] = useState({ name: "", email: "", role: "Store Manager", siteId: "" });
   const [notice, setNotice] = useState<string>("");
   const [error, setError] = useState("");
+  const [rowError, setRowError] = useState("");
 
   async function load() {
     setLoading(true);
@@ -69,11 +70,35 @@ export default function UsersAdmin() {
   }
 
   async function toggleActive(u: UserRow) {
-    await fetch("/api/admin/users", {
+    setRowError("");
+    const res = await fetch("/api/admin/users", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id: u.id, active: !u.active }),
     });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      setRowError(body.error || "Something went wrong.");
+      return;
+    }
+    load();
+  }
+
+  async function deleteUser(u: UserRow) {
+    if (!window.confirm(`Permanently delete ${u.name}'s account (${u.email})? This can't be undone - use Disable instead if you might want it back.`)) {
+      return;
+    }
+    setRowError("");
+    const res = await fetch("/api/admin/users", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: u.id }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      setRowError(body.error || "Something went wrong.");
+      return;
+    }
     load();
   }
 
@@ -136,6 +161,7 @@ export default function UsersAdmin() {
       <div style={{ height: 20 }} />
 
       <Card title={`Users (${users.length})`}>
+        {rowError && <div style={{ color: "#d03b3b", fontSize: 13, marginBottom: 12 }}>{rowError}</div>}
         {loading ? (
           <p style={{ color: "#6E6E6E" }}>Loading...</p>
         ) : (
@@ -164,6 +190,7 @@ export default function UsersAdmin() {
                   <td style={{ whiteSpace: "nowrap" }}>
                     <button onClick={() => toggleActive(u)} style={linkButtonStyle}>{u.active ? "Disable" : "Enable"}</button>
                     <button onClick={() => resetPassword(u)} style={linkButtonStyle}>Reset password</button>
+                    <button onClick={() => deleteUser(u)} style={{ ...linkButtonStyle, color: "#d03b3b" }}>Delete</button>
                   </td>
                 </tr>
               ))}
