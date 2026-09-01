@@ -8,7 +8,11 @@ export const dynamic = "force-dynamic";
 
 const HS_TEMPLATE_NAME = "H&S Walkaround";
 
-export default async function HSReviewPage() {
+export default async function HSReviewPage({
+  searchParams,
+}: {
+  searchParams: { site?: string; month?: string };
+}) {
   const session = await requireRole(["Admin", "Marketing", "H&S"]);
   if (!session) redirect("/dashboard");
 
@@ -48,6 +52,23 @@ export default async function HSReviewPage() {
   const openHsActions = hsActions.filter((a) => a.fields.Status === "Open" || a.fields.Status === "In progress");
   const rosterMismatches = openHsActions.filter((a) => (a.fields.RosterMismatch || []).length > 0);
 
+  // Monthly log filter - "filter each store and get results that were
+  // submitted that month" (Lorraine, 1 Sep 2026). Plain GET-form querystring
+  // filtering (no client JS needed) - site + month, both optional, applied
+  // only to the submissions table below, not the KPIs above (which stay
+  // all-time so they still read as "current state of the estate").
+  const selectedSiteId = searchParams.site || "";
+  const selectedMonth = searchParams.month || ""; // YYYY-MM
+  const filteredSubmissions = hsSubmissions.filter((s) => {
+    if (selectedSiteId && s.fields.Site?.[0] !== selectedSiteId) return false;
+    if (selectedMonth && !(s.fields.SubmissionDate || "").startsWith(selectedMonth)) return false;
+    return true;
+  });
+  const hsSiteOptions = sites
+    .filter((s) => (s.fields as any)["H&SChecklistApplies"] !== false)
+    .slice()
+    .sort((a, b) => (a.fields.SiteName || "").localeCompare(b.fields.SiteName || ""));
+
   return (
     <div>
       <h1 style={{ fontSize: 24, marginBottom: 4 }}>H&S Review</h1>
@@ -61,7 +82,28 @@ export default async function HSReviewPage() {
         <KpiCard label="Roster/poster mismatches open" value={rosterMismatches.length} />
       </div>
 
-      <Card title="Recent submissions">
+      <Card title={`Submissions log (${filteredSubmissions.length}${selectedSiteId || selectedMonth ? ` of ${hsSubmissions.length}` : ""})`}>
+        <form method="get" style={{ display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap", marginBottom: 16 }}>
+          <div>
+            <label style={{ display: "block", fontSize: 12, color: "#6E6E6E", marginBottom: 4 }}>Site</label>
+            <select name="site" defaultValue={selectedSiteId} style={{ padding: "8px 10px", border: "1px solid #ccc", borderRadius: 6, fontSize: 14, minWidth: 180 }}>
+              <option value="">All sites</option>
+              {hsSiteOptions.map((s) => (
+                <option key={s.id} value={s.id}>{s.fields.SiteName}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label style={{ display: "block", fontSize: 12, color: "#6E6E6E", marginBottom: 4 }}>Month</label>
+            <input type="month" name="month" defaultValue={selectedMonth} style={{ padding: "8px 10px", border: "1px solid #ccc", borderRadius: 6, fontSize: 14 }} />
+          </div>
+          <button type="submit" style={{ background: "#E6017E", color: "#fff", border: "none", borderRadius: 6, padding: "9px 16px", fontSize: 14, fontWeight: 600, cursor: "pointer" }}>
+            Filter
+          </button>
+          {(selectedSiteId || selectedMonth) && (
+            <a href="/hs-review" style={{ fontSize: 13, color: "#3348B0" }}>Clear filters</a>
+          )}
+        </form>
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
           <thead>
             <tr style={{ textAlign: "left", color: "#6E6E6E", borderBottom: "1px solid #eee" }}>
@@ -73,7 +115,7 @@ export default async function HSReviewPage() {
             </tr>
           </thead>
           <tbody>
-            {hsSubmissions.map((s) => (
+            {filteredSubmissions.map((s) => (
               <tr key={s.id} style={{ borderBottom: "1px solid #f2f2f2" }}>
                 <td style={{ padding: "8px 4px" }}>{siteName(s.fields.Site?.[0])}</td>
                 <td>{s.fields.SubmissionDate}</td>
@@ -84,8 +126,8 @@ export default async function HSReviewPage() {
                 </td>
               </tr>
             ))}
-            {hsSubmissions.length === 0 && (
-              <tr><td colSpan={5} style={{ padding: "16px 4px", color: "#999" }}>No H&S checks submitted yet.</td></tr>
+            {filteredSubmissions.length === 0 && (
+              <tr><td colSpan={5} style={{ padding: "16px 4px", color: "#999" }}>{selectedSiteId || selectedMonth ? "No H&S checks match this filter." : "No H&S checks submitted yet."}</td></tr>
             )}
           </tbody>
         </table>

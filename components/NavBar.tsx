@@ -8,9 +8,9 @@ type NavLink = { href: string; label: string; roles: UserRole[] };
 const LINKS: NavLink[] = [
   { href: "/dashboard", label: "Overview", roles: ["Admin", "Marketing"] },
   { href: "/actions", label: "Actions", roles: ["Admin", "Marketing"] },
-  { href: "/upload", label: "POS Check", roles: ["Admin", "Marketing", "Store Manager"] },
+  { href: "/pos-check", label: "POS Check", roles: ["Admin", "Marketing", "Store Manager"] },
   { href: "/requests", label: "POS Requests", roles: ["Admin", "Marketing"] },
-  { href: "/hs-walkaround", label: "H&S Check", roles: ["Admin", "Marketing", "H&S", "Store Manager"] },
+  { href: "/hs-check", label: "H&S Check", roles: ["Admin", "Marketing", "H&S", "Store Manager"] },
   { href: "/hs-review", label: "H&S Review", roles: ["Admin", "Marketing", "H&S"] },
   { href: "/admin/users", label: "Users & Access", roles: ["Admin"] },
 ];

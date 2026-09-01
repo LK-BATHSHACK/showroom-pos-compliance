@@ -19,6 +19,8 @@ export type AnswerType =
   | "Multiple choice (checkboxes)"
   | "File upload";
 
+export type ReferenceImage = { url: string; caption?: string };
+
 export type TemplateQuestion = {
   id: string;
   qnum: number | null;
@@ -34,6 +36,47 @@ export type TemplateQuestion = {
   scopeSiteNames: string[];
   rosterRole: "H&S Rep" | "Mental Health First Aider" | "Emergency Contact" | null;
   urgency: "Digest" | "Immediate";
+  // Reference photo(s) shown next to the question so whoever's filling this
+  // in can see what "compliant" actually looks like - same reasoning and
+  // pattern as the POS Walkaround form's referenceImageUrl (31 Aug/1 Sep
+  // 2026, Lorraine noticed the H&S poster questions were missing theirs
+  // too). Extracted from the source Excel's embedded cell images
+  // ("Health and Safety Checklist Questions with posters etc for
+  // Lorraine.xlsx") and stored as static files under public/hs-reference/,
+  // not in Airtable (Template Questions has no image field yet) - same
+  // "guaranteed to render regardless of Airtable data state" reasoning as
+  // POS. A question can have more than one (e.g. Q10's NI vs GB poster,
+  // Q58's NI vs ROI contacts) since the real form shows different posters
+  // depending on the respondent's region.
+  referenceImages: ReferenceImage[];
+};
+
+// qnum -> reference image(s), keyed by the real H&S form's question number
+// (Template Questions.QuestionNumber). Only the 13 questions that actually
+// had an embedded image in the source Excel get an entry here.
+const HS_REFERENCE_IMAGES: Record<number, ReferenceImage[]> = {
+  10: [
+    { url: "/hs-reference/q10-ni-poster.png", caption: "NI" },
+    { url: "/hs-reference/q10-gb-poster.png", caption: "GB (red poster)" },
+  ],
+  11: [{ url: "/hs-reference/q11-hs-reps-poster.png" }],
+  19: [
+    { url: "/hs-reference/q19-manual-handling-poster-1.png", caption: "Example 1" },
+    { url: "/hs-reference/q19-manual-handling-poster-2.png", caption: "Example 2" },
+  ],
+  21: [{ url: "/hs-reference/q21-large-tile-lifting-poster.png" }],
+  23: [{ url: "/hs-reference/q23-children-supervised-sign.png" }],
+  29: [{ url: "/hs-reference/q29-assembly-point-sign.png" }],
+  30: [{ url: "/hs-reference/q30-evacuation-procedure-example.png", caption: "Example only - yours will show your own site/Fire Warden" }],
+  31: [{ url: "/hs-reference/q31-fire-marshals-poster-template.png" }],
+  41: [{ url: "/hs-reference/q41-first-aid-responders-poster-template.png" }],
+  44: [{ url: "/hs-reference/q44-first-aid-kit-size-chart.png" }],
+  46: [{ url: "/hs-reference/q46-first-aid-kit-contents-chart.png" }],
+  51: [{ url: "/hs-reference/q51-mhfa-poster.png" }],
+  58: [
+    { url: "/hs-reference/q58-emergency-contacts-ni.png", caption: "NI" },
+    { url: "/hs-reference/q58-emergency-contacts-roi.png", caption: "ROI" },
+  ],
 };
 
 export type SiteOption = {
@@ -41,6 +84,7 @@ export type SiteOption = {
   name: string;
   siteType: string | null;
   region: "NI" | "ROI" | "GB" | null;
+  hsApplies: boolean;
 };
 
 export type RosterRow = {
@@ -66,7 +110,7 @@ function splitOptions(raw: string | null | undefined): string[] {
 }
 
 export async function fetchSites(): Promise<SiteOption[]> {
-  const records = await listRecords<{ SiteName: string; SiteType?: string; Region?: string; Active?: boolean }>(TABLES.SITES);
+  const records = await listRecords<{ SiteName: string; SiteType?: string; Region?: string; Active?: boolean; "H&SChecklistApplies"?: boolean }>(TABLES.SITES);
   return records
     .filter((r) => r.fields.Active !== false)
     .map((r) => ({
@@ -74,6 +118,7 @@ export async function fetchSites(): Promise<SiteOption[]> {
       name: r.fields.SiteName,
       siteType: r.fields.SiteType || null,
       region: (r.fields.Region as any) || null,
+      hsApplies: r.fields["H&SChecklistApplies"] === true,
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
 }
@@ -126,6 +171,7 @@ export async function fetchHSQuestions(): Promise<TemplateQuestion[]> {
       scopeSiteNames: (q.fields.ScopeSites || []).map((id) => siteNameById[id]).filter(Boolean),
       rosterRole: (q.fields.RosterRole as any) || null,
       urgency: (q.fields.UrgencyClass as any) || "Digest",
+      referenceImages: HS_REFERENCE_IMAGES[q.fields.QuestionNumber ?? -1] || [],
     }))
     .sort((a, b) => a.order - b.order);
 }
@@ -205,7 +251,7 @@ const ROSTER_CHECKS: Record<number, (answer: string, site: SiteOption) => Roster
 // "Report an issue" free-text fields - the form's own explicit issue-capture
 // questions. Answered with real text (not blank / "n/a") => a tracked Action.
 // This is deliberately narrower than "infer an issue from every answer" -
-// see the architecture note in app/hs-walkaround: auto-Action-creation only
+// see the architecture note in app/hs-check: auto-Action-creation only
 // covers roster mismatches + these explicit fields + the two training/risk-
 // assessment request questions; every other answer is still fully visible
 // on the H&S Review page for Salli/Marketing/Admin to act on by hand.
@@ -232,7 +278,43 @@ export type SubmissionInput = {
   // questionId, already base64-encoded by the API route from the multipart
   // upload. Optional - most submissions won't have any.
   files?: Record<string, AttachmentUpload[]>;
+  // req.headers.get("host") from the API route, so the submission-summary
+  // email (see sendSubmissionSummaryEmail) can link straight back to
+  // /hs-review/[id] - same pattern as the monthly-summary cron's dashboard
+  // link. Optional - the email still sends without it, just without a link.
+  appHost?: string;
 };
+
+// ---------------------------------------------------------------------------
+// Who gets H&S notification emails (submission summaries, accident/incident
+// escalations, monthly-overdue digest - see submitHSWalkaround and the
+// reminders cron). Looked up from the Users table (Role: "H&S", Active) so
+// it stays correct automatically as who holds that role changes, rather than
+// hardcoding Salli's address in source or requiring a Vercel env var to be
+// kept in sync with Users & Access by hand. Falls back to HS_ESCALATION_EMAIL
+// then MARKETING_NOTIFY_EMAIL if no active H&S user is found, so a gap in
+// Users & Access doesn't silently mean nobody gets notified.
+// ---------------------------------------------------------------------------
+
+export async function getHSNotifyEmails(): Promise<string[]> {
+  const users = await listRecords<{ Role?: string; Email?: string; Active?: boolean }>(TABLES.USERS);
+  const hsUsers = users
+    .filter((u) => u.fields.Role === "H&S" && u.fields.Active === true && u.fields.Email)
+    .map((u) => u.fields.Email as string);
+  if (hsUsers.length > 0) return hsUsers;
+  return [process.env.HS_ESCALATION_EMAIL, process.env.MARKETING_NOTIFY_EMAIL].filter((e): e is string => !!e);
+}
+
+// The day of the month H&S checks are considered "due" - if a site hasn't
+// submitted an H&S Walkaround for the current calendar month by this day,
+// the overdue digest (see the reminders cron) includes it. H&S has no real
+// per-site due-date data the way POS's NextAuditDue does (flagged in Round 3
+// as needing cadence dates from Salli, which weren't available yet) - this
+// is a reasonable default assuming a straightforward "once a month" cadence
+// for every site, not confirmed cadence data. Easy to change to a real
+// per-site NextHSCheckDue field later if the cadence turns out to vary by
+// site/region - flag that to Lorraine rather than assuming it's fine as-is.
+export const HS_MONTHLY_DUE_DAY = 25;
 
 export async function submitHSWalkaround(input: SubmissionInput) {
   const [sites, questions, rosters, templates] = await Promise.all([
@@ -385,6 +467,13 @@ export async function submitHSWalkaround(input: SubmissionInput) {
     await sendImmediateEscalation(site.name, input.submittedByName, input.submittedByEmail, immediateHits);
   }
 
+  // Submission summary - every H&S check, not just ones with issues (per
+  // Lorraine, 1 Sep 2026: "salli.hunt@bathshack.com gets notified when one
+  // is submitted ... with any actions at the end that might need to be
+  // taken"). Separate from the immediate-escalation email above, which is
+  // specifically for accident/incident/near-miss content.
+  await sendSubmissionSummaryEmail(site.name, submission.id, input.submittedByName, input.submittedByEmail, actionsToCreate, input.appHost);
+
   return {
     submissionId: submission.id,
     answersCreated: answerRecords.length,
@@ -394,15 +483,55 @@ export async function submitHSWalkaround(input: SubmissionInput) {
   };
 }
 
+async function sendSubmissionSummaryEmail(
+  siteName: string,
+  submissionId: string,
+  byName: string,
+  byEmail: string,
+  actions: Record<string, any>[],
+  appHost?: string
+) {
+  const to = await getHSNotifyEmails();
+  if (to.length === 0) {
+    console.warn("No H&S notify recipients found (no active H&S user, HS_ESCALATION_EMAIL or MARKETING_NOTIFY_EMAIL) - skipping H&S submission summary email.");
+    return;
+  }
+
+  const actionsHtml =
+    actions.length > 0
+      ? `<table style="width:100%; border-collapse:collapse; font-size:14px; margin: 12px 0;">
+           <thead><tr style="text-align:left; color:${BRAND.grey};"><th style="padding:6px 8px;">Issue</th><th style="padding:6px 8px;">Priority</th></tr></thead>
+           <tbody>${actions
+             .map(
+               (a) => `<tr>
+                 <td style="padding:6px 8px; border-bottom:1px solid #eee;">${escapeHtml(a.IssueDescription || "")}</td>
+                 <td style="padding:6px 8px; border-bottom:1px solid #eee;">${escapeHtml(a.Priority || "")}</td>
+               </tr>`
+             )
+             .join("")}</tbody>
+         </table>`
+      : `<p style="color:${BRAND.grey};">No follow-up actions flagged from this check - no roster/poster mismatches or reported issues.</p>`;
+
+  const link = appHost ? `<p style="margin-top:20px;"><a href="https://${appHost}/hs-review/${submissionId}" style="color:${BRAND.pink};">View the full submission</a></p>` : "";
+
+  const body = `
+    <p><strong>${escapeHtml(siteName)}</strong> submitted an H&S Check, completed by ${escapeHtml(byName)} (${escapeHtml(byEmail)}).</p>
+    <h3 style="margin-bottom:6px;">Actions that may need to be taken</h3>
+    ${actionsHtml}
+    ${link}
+  `;
+  await sendEmail(to, `H&S Check submitted - ${siteName}`, emailShell("H&S Check Submitted", body));
+}
+
 async function sendImmediateEscalation(
   siteName: string,
   byName: string,
   byEmail: string,
   hits: { question: TemplateQuestion; answer: string }[]
 ) {
-  const to = process.env.HS_ESCALATION_EMAIL || process.env.MARKETING_NOTIFY_EMAIL;
-  if (!to) {
-    console.warn("HS_ESCALATION_EMAIL and MARKETING_NOTIFY_EMAIL both unset - skipping H&S immediate escalation email.");
+  const to = await getHSNotifyEmails();
+  if (to.length === 0) {
+    console.warn("No H&S notify recipients found (no active H&S user, HS_ESCALATION_EMAIL or MARKETING_NOTIFY_EMAIL) - skipping H&S immediate escalation email.");
     return;
   }
   const rows = hits

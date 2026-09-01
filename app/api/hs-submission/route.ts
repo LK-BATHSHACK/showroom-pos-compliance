@@ -65,6 +65,7 @@ export async function POST(req: NextRequest) {
       submittedByEmail: session.email,
       answers,
       files,
+      appHost: req.headers.get("host") || undefined,
     });
     return NextResponse.json({ success: true, ...result });
   } catch (err: any) {

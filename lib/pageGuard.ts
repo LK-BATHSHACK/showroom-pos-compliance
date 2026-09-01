@@ -19,7 +19,7 @@ export async function guardRole(roles: UserRole[], fallback?: string): Promise<S
 export function homeForRole(role: UserRole): string {
   switch (role) {
     case "Store Manager":
-      return "/hs-walkaround";
+      return "/hs-check";
     case "H&S":
       return "/hs-review";
     default:

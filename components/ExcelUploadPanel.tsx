@@ -5,7 +5,7 @@ import { Card } from "@/components/ui";
 
 // Jordan's own spot-check rounds still come through here as Excel files -
 // this is the pre-existing upload flow, unchanged, just extracted out of
-// app/upload/page.tsx so it can sit alongside the in-tool checklist as a tab
+// app/pos-check/page.tsx so it can sit alongside the in-tool checklist as a tab
 // (31 Aug 2026 - "Jordan uses the upload for the audit upload").
 export default function ExcelUploadPanel() {
   const [file, setFile] = useState<File | null>(null);

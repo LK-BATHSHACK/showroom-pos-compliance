@@ -23,6 +23,7 @@ type TemplateQuestion = {
   options: string[];
   optionsRaw: string | null;
   required: boolean;
+  referenceImages: { url: string; caption?: string }[];
 };
 
 // Mirrors lib/airtable.ts's MAX_ATTACHMENT_BYTES (Airtable's own 5MB/file
@@ -419,6 +420,21 @@ function QuestionField({
   return (
     <div id={`q-${q.id}`} style={{ marginBottom: 22, paddingBottom: 4 }}>
       {label}
+      {q.referenceImages.length > 0 && (
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 10 }}>
+          {q.referenceImages.map((img) => (
+            <a key={img.url} href={img.url} target="_blank" rel="noopener noreferrer" style={{ display: "inline-block" }}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={img.url}
+                alt={img.caption ? `What this should look like - ${img.caption}` : "What this should look like"}
+                style={{ width: 110, height: 110, objectFit: "cover", borderRadius: 6, border: "1px solid #ddd", display: "block" }}
+              />
+              <div style={{ fontSize: 11, color: "#3348B0", marginTop: 3, maxWidth: 110 }}>{img.caption || "What this should look like"}</div>
+            </a>
+          ))}
+        </div>
+      )}
       {field}
       {error && <div style={{ color: "#d03b3b", fontSize: 12, marginTop: 4 }}>{error}</div>}
     </div>
