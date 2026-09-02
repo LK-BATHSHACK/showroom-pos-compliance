@@ -1,0 +1,80 @@
+/*
+  Silka is Bathshack's brand font (see Brand Guidelines: Typography section -
+  weights Thin/Light/Regular/Medium/Bold). It's a licensed commercial font,
+  so the actual font files aren't included in this codebase - only Lorraine
+  (or whoever holds the Bathshack Silka license) can add them.
+
+  To activate it:
+  1. Get the webfont files (.woff2) for the weights you want from your Silka
+     license/font kit.
+  2. Drop them into /public/fonts/ using these exact names (or update the
+     @font-face src paths below to match whatever you're given):
+       - Silka-Light.woff2      (font-weight: 300)
+       - Silka-Regular.woff2    (font-weight: 400)
+       - Silka-Medium.woff2     (font-weight: 500)
+       - Silka-Bold.woff2       (font-weight: 700)
+  3. Redeploy. Until those files exist, the browser silently falls back to
+     Poppins (Bathshack's documented fallback font) - nothing breaks, it
+     just won't be true Silka.
+*/
+
+@font-face {
+  font-family: "Silka";
+  src: url("/fonts/Silka-Light.woff2") format("woff2");
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Silka";
+  src: url("/fonts/Silka-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Silka";
+  src: url("/fonts/Silka-Medium.woff2") format("woff2");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Silka";
+  src: url("/fonts/Silka-Bold.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  --font-body: "Silka", "Poppins", Arial, sans-serif;
+}
+
+html,
+body {
+  font-family: var(--font-body);
+}
+
+/* Mobile-friendliness pass (2 Sep 2026, prompted by Salli's H&S Check
+   feedback via Lorraine) - most of the app's styling is inline per-component
+   and already responsive (percentage widths, flex-wrap), but two gaps were
+   estate-wide: no box-sizing reset (padding could push a 100%-width element
+   past its container on a narrow screen) and no cap on accidental horizontal
+   overflow (e.g. a long unbroken URL or table). */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  overflow-x: hidden;
+}
+
+img {
+  max-width: 100%;
+}
