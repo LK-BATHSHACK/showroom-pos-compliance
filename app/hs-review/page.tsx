@@ -4,6 +4,7 @@ import { requireRole } from "@/lib/auth";
 import { listRecords, TABLES } from "@/lib/airtable";
 import { Card, KpiCard } from "@/components/ui";
 import DownloadLogPdfButton from "@/components/DownloadLogPdfButton";
+import DownloadStorePdfButton from "@/components/DownloadStorePdfButton";
 
 export const dynamic = "force-dynamic";
 
@@ -25,6 +26,7 @@ export default async function HSReviewPage({
       ChecklistTemplate?: string[];
       SubmissionDate?: string;
       CompletedByName?: string;
+      CompletedByEmail?: string;
       Status?: string;
     }>(TABLES.SUBMISSIONS, { sort: [{ field: "SubmissionDate", direction: "desc" }] }),
     listRecords<{ SiteName: string }>(TABLES.SITES),
@@ -37,8 +39,13 @@ export default async function HSReviewPage({
       Priority?: string;
       DateIdentified?: string;
     }>(TABLES.ACTIONS),
-    listRecords<{ TemplateQuestion?: string[]; Submission?: string[] }>(TABLES.ANSWERS),
-    listRecords<{ Template?: string[]; QuestionNumber?: number; QuestionText?: string }>(TABLES.TEMPLATE_QUESTIONS),
+    listRecords<{
+      TemplateQuestion?: string[];
+      Submission?: string[];
+      AnswerText?: string;
+      Photo?: { id: string; filename: string }[];
+    }>(TABLES.ANSWERS),
+    listRecords<{ Template?: string[]; QuestionNumber?: number; QuestionText?: string; Section?: string; OrderIndex?: number }>(TABLES.TEMPLATE_QUESTIONS),
   ]);
 
   const hsTemplate = templates.find((t) => t.fields.TemplateName === HS_TEMPLATE_NAME);
@@ -100,6 +107,52 @@ export default async function HSReviewPage({
     status: s.fields.Status || "",
   }));
 
+  // "One combined PDF per store (all its submissions)" (Lorraine, 2 Sep
+  // 2026) - every H&S Check the selected site has EVER submitted, full Q&A
+  // each, in one file. Deliberately all-time regardless of the Month filter
+  // above (that filter is for the on-screen log/table only) - only appears
+  // once a specific site is chosen, since "all its submissions" needs one
+  // site to mean anything.
+  let storePdfSubmissions: import("@/components/DownloadStorePdfButton").StorePdfSubmission[] = [];
+  if (selectedSiteId) {
+    const questionById = new Map(questions.map((q) => [q.id, q.fields]));
+    const siteSubmissions = hsSubmissions
+      .filter((s) => s.fields.Site?.[0] === selectedSiteId)
+      .slice()
+      .sort((a, b) => (a.fields.SubmissionDate || "").localeCompare(b.fields.SubmissionDate || "")); // oldest first, reads chronologically
+
+    storePdfSubmissions = siteSubmissions.map((s) => {
+      const subAnswers = answers
+        .filter((a) => a.fields.Submission?.includes(s.id))
+        .map((a) => ({ ...a.fields, question: questionById.get(a.fields.TemplateQuestion?.[0] || "") }))
+        .filter((a) => a.question)
+        .sort((a, b) => (a.question!.OrderIndex || 0) - (b.question!.OrderIndex || 0));
+
+      const bySection = new Map<string, typeof subAnswers>();
+      subAnswers.forEach((a) => {
+        const section = a.question!.Section || "";
+        if (!bySection.has(section)) bySection.set(section, []);
+        bySection.get(section)!.push(a);
+      });
+
+      return {
+        submissionDate: s.fields.SubmissionDate || "",
+        completedByName: s.fields.CompletedByName || "",
+        completedByEmail: s.fields.CompletedByEmail || "",
+        status: s.fields.Status || "",
+        sections: Array.from(bySection.entries()).map(([section, items]) => ({
+          section,
+          items: items.map((a) => ({
+            qnum: a.question!.QuestionNumber ?? null,
+            text: a.question!.QuestionText || "",
+            answerText: a.AnswerText || "",
+            hasPhotos: (a.Photo || []).length > 0,
+          })),
+        })),
+      };
+    });
+  }
+
   return (
     <div>
       <h1 style={{ fontSize: 24, marginBottom: 4 }}>H&S Review</h1>
@@ -118,7 +171,12 @@ export default async function HSReviewPage({
           <h3 style={{ marginTop: 0, marginBottom: 0, fontSize: 16 }}>
             Submissions log ({filteredSubmissions.length}{selectedSiteId || selectedMonth ? ` of ${hsSubmissions.length}` : ""})
           </h3>
-          <DownloadLogPdfButton rows={pdfRows} filterDescription={filterDescription} />
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <DownloadLogPdfButton rows={pdfRows} filterDescription={filterDescription} />
+            {selectedSiteId && (
+              <DownloadStorePdfButton siteName={siteName(selectedSiteId)} submissions={storePdfSubmissions} />
+            )}
+          </div>
         </div>
         <form method="get" style={{ display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap", marginTop: 16, marginBottom: 16 }}>
           <div>

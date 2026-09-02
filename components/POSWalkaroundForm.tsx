@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Card } from "@/components/ui";
-import { POS_WALKAROUND_QUESTIONS, type PosQuestion } from "@/lib/posWalkaround";
+import { type PosQuestion } from "@/lib/posWalkaround";
 
 type ShowroomOption = { id: string; name: string };
 
@@ -17,6 +17,7 @@ export default function POSWalkaroundForm({
   lockedShowroom,
   lockedShowroomError,
   submittedByName,
+  questions,
 }: {
   showrooms: ShowroomOption[];
   lockedShowroom: ShowroomOption | null;
@@ -25,6 +26,11 @@ export default function POSWalkaroundForm({
   // resolveShowroomForSite in lib/posWalkaround.ts.
   lockedShowroomError: string | null;
   submittedByName: string;
+  // Fetched server-side (fetchPOSQuestions(), lib/posWalkaround.ts) rather
+  // than a hardcoded import, so Admin/H&S edits via the question editor
+  // show up here without a code change - same source-of-truth move H&S's
+  // questions already went through.
+  questions: PosQuestion[];
 }) {
   const [showroomId, setShowroomId] = useState<string>(lockedShowroom?.id || "");
   const [answers, setAnswers] = useState<Record<number, string>>({ 3: submittedByName });
@@ -35,16 +41,30 @@ export default function POSWalkaroundForm({
   const [result, setResult] = useState<any>(null);
   const [submitError, setSubmitError] = useState("");
 
+  // Sectioned/paginated layout, same pattern as the H&S form (Lorraine, 2
+  // Sep 2026: "can we make the pos follow a similar section plan?").
+  const [currentSection, setCurrentSection] = useState(0);
+  const [pendingScrollId, setPendingScrollId] = useState<number | null>(null);
+
   const showroomName = lockedShowroom?.name || showrooms.find((s) => s.id === showroomId)?.name || "";
 
   const sections = useMemo(() => {
     const map = new Map<string, PosQuestion[]>();
-    POS_WALKAROUND_QUESTIONS.forEach((q) => {
+    questions.forEach((q) => {
       if (!map.has(q.section)) map.set(q.section, []);
       map.get(q.section)!.push(q);
     });
     return Array.from(map.entries());
-  }, []);
+  }, [questions]);
+
+  const questionRanges = useMemo(() => {
+    let idx = 0;
+    return sections.map(([, qs]) => {
+      const start = idx + 1;
+      idx += qs.length;
+      return [start, idx] as const;
+    });
+  }, [sections]);
 
   function setAnswer(q: PosQuestion, value: string) {
     setAnswers((prev) => ({ ...prev, [q.qnum]: value }));
@@ -102,19 +122,10 @@ export default function POSWalkaroundForm({
     return answers[q.qnum] || "";
   }
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!showroomName) {
-      setSubmitError("Pick a showroom first.");
-      return;
-    }
-
+  function validate(qs: PosQuestion[]): Record<number, string> {
     const newErrors: Record<number, string> = {};
-    POS_WALKAROUND_QUESTIONS.forEach((q) => {
+    qs.forEach((q) => {
       if (q.type === "photo") {
-        // Never blocks on "required" - photos are optional - but a
-        // rejected-file message from setFiles() (too big / too many)
-        // should still stop submission until it's cleared.
         if (errors[q.qnum]) newErrors[q.qnum] = errors[q.qnum];
         return;
       }
@@ -122,10 +133,47 @@ export default function POSWalkaroundForm({
         newErrors[q.qnum] = "This is required.";
       }
     });
+    return newErrors;
+  }
+
+  function goToSection(index: number) {
+    setCurrentSection(index);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function handleNext() {
+    if (!showroomName) {
+      setSubmitError("Pick a showroom first.");
+      return;
+    }
+    setSubmitError("");
+    const [, qs] = sections[currentSection];
+    const sectionErrors = validate(qs);
+    if (Object.keys(sectionErrors).length > 0) {
+      setErrors((prev) => ({ ...prev, ...sectionErrors }));
+      const firstQnum = qs.find((q) => sectionErrors[q.qnum])?.qnum;
+      if (firstQnum !== undefined) setPendingScrollId(firstQnum);
+      return;
+    }
+    goToSection(currentSection + 1);
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!showroomName) {
+      setSubmitError("Pick a showroom first.");
+      return;
+    }
+
+    const newErrors = validate(questions);
     if (Object.keys(newErrors).length > 0) {
       setErrors(newErrors);
-      const firstQnum = Object.keys(newErrors)[0];
-      document.getElementById(`q-${firstQnum}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+      const firstErrorQnum = questions.find((q) => newErrors[q.qnum])?.qnum;
+      if (firstErrorQnum !== undefined) {
+        const sectionIndex = sections.findIndex(([, qs]) => qs.some((q) => q.qnum === firstErrorQnum));
+        if (sectionIndex >= 0 && sectionIndex !== currentSection) setCurrentSection(sectionIndex);
+        setPendingScrollId(firstErrorQnum);
+      }
       return;
     }
 
@@ -134,11 +182,11 @@ export default function POSWalkaroundForm({
     const payload = {
       showroomId: lockedShowroom?.id || showroomId,
       showroomName,
-      answers: POS_WALKAROUND_QUESTIONS.filter((q) => q.type !== "photo").map((q) => ({ qnum: q.qnum, value: finalValueFor(q) })),
+      answers: questions.filter((q) => q.type !== "photo").map((q) => ({ qnum: q.qnum, value: finalValueFor(q) })),
     };
     const formData = new FormData();
     formData.set("payload", JSON.stringify(payload));
-    POS_WALKAROUND_QUESTIONS.forEach((q) => {
+    questions.forEach((q) => {
       if (q.type !== "photo") return;
       (fileAnswers[q.qnum] || []).forEach((file) => formData.append(`file__${q.qnum}`, file, file.name));
     });
@@ -153,6 +201,15 @@ export default function POSWalkaroundForm({
     setResult(body);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
+
+  useEffect(() => {
+    if (!pendingScrollId) return;
+    const el = document.getElementById(`q-${pendingScrollId}`);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      setPendingScrollId(null);
+    }
+  }, [pendingScrollId, currentSection]);
 
   if (lockedShowroomError) {
     return (
@@ -185,6 +242,7 @@ export default function POSWalkaroundForm({
             setAnswers({ 3: submittedByName });
             setMultiAnswers({});
             setFileAnswers({});
+            setCurrentSection(0);
           }}
           style={{ background: "#E6017E", color: "#fff", border: "none", borderRadius: 6, padding: "10px 20px", fontSize: 14, fontWeight: 600, cursor: "pointer" }}
         >
@@ -193,6 +251,9 @@ export default function POSWalkaroundForm({
       </Card>
     );
   }
+
+  const activeSection = sections[currentSection];
+  const isLastSection = currentSection === sections.length - 1;
 
   return (
     <form onSubmit={handleSubmit}>
@@ -205,7 +266,11 @@ export default function POSWalkaroundForm({
         ) : (
           <div>
             <label style={{ display: "block", fontSize: 13, color: "#6E6E6E", marginBottom: 6 }}>Which showroom?</label>
-            <select value={showroomId} onChange={(e) => setShowroomId(e.target.value)} style={{ padding: "10px 12px", border: "1px solid #ccc", borderRadius: 6, fontSize: 15, minWidth: 280 }}>
+            <select
+              value={showroomId}
+              onChange={(e) => setShowroomId(e.target.value)}
+              style={{ padding: "10px 12px", border: "1px solid #ccc", borderRadius: 6, fontSize: 15, width: "100%", maxWidth: 340 }}
+            >
               <option value="">Select a showroom...</option>
               {showrooms.map((s) => (
                 <option key={s.id} value={s.id}>{s.name}</option>
@@ -215,36 +280,74 @@ export default function POSWalkaroundForm({
         )}
       </Card>
 
-      {sections.map(([section, qs]) => (
-        <div key={section} style={{ marginTop: 20 }}>
-          <Card title={section}>
-            {qs.map((q) => (
-              <QuestionField
-                key={q.qnum}
-                q={q}
-                value={answers[q.qnum] || ""}
-                multiValue={multiAnswers[q.qnum] || []}
-                fileValue={fileAnswers[q.qnum] || []}
-                error={errors[q.qnum]}
-                onChange={(v) => setAnswer(q, v)}
-                onMultiToggle={(opt, checked) => toggleMulti(q, opt, checked)}
-                onFilesChange={(fl) => setFiles(q, fl)}
-                onFileRemove={(i) => removeFile(q, i)}
-              />
-            ))}
-          </Card>
-        </div>
-      ))}
+      <div style={{ marginTop: 20, marginBottom: 10, fontSize: 13, color: "#6E6E6E" }}>
+        Section {currentSection + 1} of {sections.length}
+        {questionRanges[currentSection] && (
+          <>
+            {" "}&middot; Question{questionRanges[currentSection][0] === questionRanges[currentSection][1] ? "" : "s"}{" "}
+            {questionRanges[currentSection][0] === questionRanges[currentSection][1]
+              ? questionRanges[currentSection][0]
+              : `${questionRanges[currentSection][0]}-${questionRanges[currentSection][1]}`}{" "}
+            of {questions.length}
+          </>
+        )}
+      </div>
+      <div style={{ display: "flex", gap: 4, marginBottom: 16, flexWrap: "wrap" }}>
+        {sections.map(([section], i) => (
+          <div
+            key={section}
+            title={section}
+            style={{ height: 4, flex: 1, minWidth: 12, borderRadius: 2, background: i <= currentSection ? "#E6017E" : "#E0E0E0" }}
+          />
+        ))}
+      </div>
 
-      <div style={{ marginTop: 20, marginBottom: 40 }}>
-        {submitError && <div style={{ color: "#d03b3b", fontSize: 13, marginBottom: 12 }}>{submitError}</div>}
-        <button
-          type="submit"
-          disabled={submitting}
-          style={{ background: "#E6017E", color: "#fff", border: "none", borderRadius: 6, padding: "12px 28px", fontSize: 15, fontWeight: 600, cursor: "pointer" }}
-        >
-          {submitting ? "Submitting..." : "Submit walkaround"}
-        </button>
+      <Card title={activeSection[0]}>
+        {activeSection[1].map((q) => (
+          <QuestionField
+            key={q.qnum}
+            q={q}
+            value={answers[q.qnum] || ""}
+            multiValue={multiAnswers[q.qnum] || []}
+            fileValue={fileAnswers[q.qnum] || []}
+            error={errors[q.qnum]}
+            onChange={(v) => setAnswer(q, v)}
+            onMultiToggle={(opt, checked) => toggleMulti(q, opt, checked)}
+            onFilesChange={(fl) => setFiles(q, fl)}
+            onFileRemove={(i) => removeFile(q, i)}
+          />
+        ))}
+      </Card>
+
+      <div style={{ marginTop: 20, marginBottom: 40, display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+        {currentSection > 0 && (
+          <button
+            type="button"
+            onClick={() => goToSection(currentSection - 1)}
+            style={{ background: "#fff", color: "#1D1C1D", border: "1px solid #ccc", borderRadius: 6, padding: "12px 22px", fontSize: 15, fontWeight: 600, cursor: "pointer" }}
+          >
+            Back
+          </button>
+        )}
+        {!isLastSection && (
+          <button
+            type="button"
+            onClick={handleNext}
+            style={{ background: "#E6017E", color: "#fff", border: "none", borderRadius: 6, padding: "12px 28px", fontSize: 15, fontWeight: 600, cursor: "pointer" }}
+          >
+            Next
+          </button>
+        )}
+        {isLastSection && (
+          <button
+            type="submit"
+            disabled={submitting}
+            style={{ background: "#E6017E", color: "#fff", border: "none", borderRadius: 6, padding: "12px 28px", fontSize: 15, fontWeight: 600, cursor: "pointer" }}
+          >
+            {submitting ? "Submitting..." : "Submit walkaround"}
+          </button>
+        )}
+        {submitError && <div style={{ color: "#d03b3b", fontSize: 13, width: "100%" }}>{submitError}</div>}
       </div>
     </form>
   );
@@ -329,7 +432,7 @@ function QuestionField({
           {fileValue.length > 0 && (
             <ul style={{ marginTop: 8, paddingLeft: 18, fontSize: 13 }}>
               {fileValue.map((f, i) => (
-                <li key={`${f.name}-${i}`} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <li key={`${f.name}-${i}`} style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                   <span>{f.name} ({(f.size / 1024 / 1024).toFixed(1)}MB)</span>
                   <button
                     type="button"
@@ -354,14 +457,16 @@ function QuestionField({
       {label}
       {q.helpText && <div style={{ fontSize: 12, color: "#6E6E6E", marginBottom: 6 }}>{q.helpText}</div>}
       {q.referenceImageUrl && (
-        <a href={q.referenceImageUrl} target="_blank" rel="noopener noreferrer" style={{ display: "inline-block", marginBottom: 10 }}>
+        // Bigger than before (110px -> 200px), same reasoning as the H&S
+        // form's reference photos (Lorraine, 2 Sep 2026).
+        <a href={q.referenceImageUrl} target="_blank" rel="noopener noreferrer" style={{ display: "inline-block", marginBottom: 12 }}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={q.referenceImageUrl}
             alt={`What this should look like - ${q.text}`}
-            style={{ width: 110, height: 110, objectFit: "cover", borderRadius: 6, border: "1px solid #ddd", display: "block" }}
+            style={{ width: 200, height: 200, objectFit: "cover", borderRadius: 8, border: "1px solid #ddd", display: "block" }}
           />
-          <div style={{ fontSize: 11, color: "#3348B0", marginTop: 3 }}>What this should look like</div>
+          <div style={{ fontSize: 12, color: "#3348B0", marginTop: 4 }}>What this should look like</div>
         </a>
       )}
       {field}

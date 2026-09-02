@@ -3,6 +3,7 @@
 import { useState } from "react";
 import POSWalkaroundForm from "@/components/POSWalkaroundForm";
 import ExcelUploadPanel from "@/components/ExcelUploadPanel";
+import type { PosQuestion } from "@/lib/posWalkaround";
 
 type ShowroomOption = { id: string; name: string };
 
@@ -17,12 +18,14 @@ export default function UploadTabs({
   lockedShowroomError,
   submittedByName,
   showExcelTab,
+  questions,
 }: {
   showrooms: ShowroomOption[];
   lockedShowroom: ShowroomOption | null;
   lockedShowroomError: string | null;
   submittedByName: string;
   showExcelTab: boolean;
+  questions: PosQuestion[];
 }) {
   const [tab, setTab] = useState<"form" | "excel">("form");
 
@@ -41,6 +44,7 @@ export default function UploadTabs({
           lockedShowroom={lockedShowroom}
           lockedShowroomError={lockedShowroomError}
           submittedByName={submittedByName}
+          questions={questions}
         />
       ) : (
         <ExcelUploadPanel />

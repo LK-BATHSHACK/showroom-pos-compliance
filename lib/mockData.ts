@@ -351,8 +351,15 @@ const siteByName = (n: string) => sites.find((s) => s.fields.SiteName === n)!;
 const checklistTemplates: Rec[] = [
   { id: nextId("tpl"), createdTime: "2026-08-31T09:00:00.000Z", fields: { TemplateName: "POS Compliance", Version: 1, Status: "Active", ScoringModel: "Weighted score (100pt)" } },
   { id: nextId("tpl"), createdTime: "2026-08-31T09:00:00.000Z", fields: { TemplateName: "H&S Walkaround", Version: 1, Status: "Active", ScoringModel: "Pass/fail with escalation" } },
+  // The in-tool POS Walkaround form's own template (distinct from "POS
+  // Compliance" above, which is the older/unused-by-the-live-form Template
+  // Questions representation) - added 2 Sep 2026 alongside the real
+  // Airtable seed, so PREVIEW_MODE exercises the same fetchPOSQuestions()
+  // path production uses.
+  { id: nextId("tpl"), createdTime: "2026-09-02T11:00:00.000Z", fields: { TemplateName: "POS Walkaround", Version: 1, Status: "Active", ScoringModel: "Weighted score (100pt)" } },
 ];
 const hsTemplateId = checklistTemplates[1].id;
+const posWalkaroundTemplateId = checklistTemplates[2].id;
 
 type QSeed = {
   qnum: number;
@@ -406,7 +413,7 @@ const hsQuestionSeed: QSeed[] = [
   { qnum: 65, section: "And finally...", order: 65, text: "I need a specific risk assessment (please choose a reason)", answerType: "Multiple choice (checkboxes)", options: "Not Required; New expectant mother on site; New young person (under 18) working on site; Recent serious accident or near miss; A pattern of accidents or near misses; Introduction of new equipment; Process changes; New information about a hazard; Regular Lone Working; Other", required: true },
 ];
 
-const templateQuestions: Rec[] = hsQuestionSeed.map((q) => ({
+const hsTemplateQuestions: Rec[] = hsQuestionSeed.map((q) => ({
   id: nextId("tq"),
   createdTime: "2026-08-31T09:00:00.000Z",
   fields: {
@@ -426,7 +433,62 @@ const templateQuestions: Rec[] = hsQuestionSeed.map((q) => ({
   },
 }));
 
-const tqByQnum = (n: number) => templateQuestions.find((t) => t.fields.QuestionNumber === n)!;
+// Mirrors the 29 real rows seeded into Airtable's Template Questions table
+// 2 Sep 2026 (qnum/section/order/text/answerType/options/required only -
+// helpText and referenceImageUrl stay in code, see POS_REFERENCE_META in
+// lib/posWalkaround.ts) so PREVIEW_MODE's POS Walkaround form renders the
+// same 8 sections/29 questions production does.
+const posWalkaroundQuestionSeed: QSeed[] = [
+  { qnum: 1, section: "Details", order: 1, text: "Date", answerType: "Date", required: true },
+  { qnum: 3, section: "Details", order: 3, text: "Your name and role", answerType: "Short answer", required: true },
+  { qnum: 4, section: "Details", order: 4, text: "How many customer-facing terminals does your showroom have?", answerType: "Short answer", required: true },
+  { qnum: 5, section: "Bay POS", order: 5, text: "Tile samples - does every sample have a completed label (code, description, price, box qty)?", answerType: "Single choice", options: "Yes - all tile samples are labelled; Mostly - some are missing or incomplete; No - most are missing labels", required: true },
+  { qnum: 6, section: "Bay POS", order: 6, text: "Upload a photo showing tile labels in use", answerType: "File upload" },
+  { qnum: 7, section: "Bay POS", order: 7, text: "Does every bay have the numbered duck sticker in place?", answerType: "Single choice", options: "Yes - all bays have their numbered duck sticker; Some are missing; No - most are missing", required: true },
+  { qnum: 8, section: "Sales POS", order: 8, text: "Duck Sale Wobblers - do you have enough? (min. 10)", answerType: "Single choice", options: "Yes - we have enough (10+); No - we need more", required: true },
+  { qnum: 9, section: "Sales POS", order: 9, text: "Star Wobblers - do you have enough? (NI: 10, ROI: 4)", answerType: "Single choice", options: "Yes - we have enough; No - we need more", required: true },
+  { qnum: 10, section: "Sales POS", order: 10, text: "A3 Sale Posters & Displays - do you have enough?", answerType: "Single choice", options: "Yes - we have the right amount; No - we need more posters; No - we need more displays", required: true },
+  { qnum: 11, section: "Sales POS", order: 11, text: "Showroom Exclusives A1 frame and easel - is it up, in good condition, and does it have a plant?", answerType: "Multiple choice (checkboxes)", options: "Yes; No - need frame; No - need easel; No - need plant", required: true },
+  { qnum: 12, section: "Sales POS", order: 12, text: "Tile Specials Leaflets - do you have enough? (30x)", answerType: "Single choice", options: "Yes - we have enough (30+); No - we need more", required: true },
+  { qnum: 13, section: "Sales POS", order: 13, text: "Upload a photo of sales POS in action", answerType: "File upload" },
+  { qnum: 14, section: "Customer-Facing Terminals", order: 14, text: "Are 3x awards displayed at each terminal?", answerType: "Single choice", options: "Yes; No", required: true },
+  { qnum: 15, section: "Customer-Facing Terminals", order: 15, text: "Trustpilot Poster/Sign - do you have enough? (4x)", answerType: "Single choice", options: "Yes; No", required: true },
+  { qnum: 16, section: "Customer-Facing Terminals", order: 16, text: "Price Promise Poster/Sign - do you have enough? (5x)", answerType: "Single choice", options: "Yes; No", required: true },
+  { qnum: 17, section: "Customer-Facing Terminals", order: 17, text: "QR code review cards & business cards - are both in place at every terminal?", answerType: "Multiple choice (checkboxes)", options: "Yes; No - missing QR code review cards; No - missing business cards", required: true },
+  { qnum: 18, section: "Customer-Facing Terminals", order: 18, text: "Is the Returns Policy Poster displayed?", answerType: "Single choice", options: "Yes; No", required: true },
+  { qnum: 19, section: "Customer-Facing Terminals", order: 19, text: "Upload a photo of a customer-facing terminal with correct POS", answerType: "File upload" },
+  { qnum: 20, section: "Rest of Showroom", order: 20, text: "Trustpilot Review Tent Cards - do you have enough? (9x)", answerType: "Single choice", options: "Yes; No", required: true },
+  { qnum: 21, section: "Rest of Showroom", order: 21, text: "Are Trustpilot Review Stickers displayed?", answerType: "Single choice", options: "Yes; No", required: true },
+  { qnum: 22, section: "Rest of Showroom", order: 22, text: "Framed Bathroom Photos - do you have enough? (10x)", answerType: "Single choice", options: "Yes; No", required: true },
+  { qnum: 23, section: "Rest of Showroom", order: 23, text: "Is the Toilet Cleaning Rota up to date?", answerType: "Single choice", options: "Yes; No", required: true },
+  { qnum: 24, section: "Rest of Showroom", order: 24, text: "Are toilet roll stickers in place?", answerType: "Single choice", options: "Yes; No", required: true },
+  { qnum: 25, section: "Rest of Showroom", order: 25, text: "Showroom scent - is everything present and topped up? (3x diffusers, 1x oil, 1x room spray)", answerType: "Multiple choice (checkboxes)", options: "Yes; No - need diffuser(s); No - need oil; No - need room spray", required: true },
+  { qnum: 26, section: "Rest of Showroom", order: 26, text: "Children Must Be Supervised Signs - do you have enough? (4x)", answerType: "Single choice", options: "Yes; No", required: true },
+  { qnum: 27, section: "Rest of Showroom", order: 27, text: "Are the TV Slideshows working and up to date?", answerType: "Single choice", options: "Yes; No - support needed", required: true },
+  { qnum: 28, section: "Rest of Showroom", order: 28, text: "Upload 1-3 photos of general showroom POS in action", answerType: "File upload" },
+  { qnum: 29, section: "Feedback & New Ideas", order: 29, text: "Are you in need of any POS assets which aren't on this list? All ideas welcome.", answerType: "Long answer" },
+  { qnum: 30, section: "Feedback & New Ideas", order: 30, text: "Do you require any other support or replacement assets?", answerType: "Long answer" },
+];
+
+const posWalkaroundTemplateQuestions: Rec[] = posWalkaroundQuestionSeed.map((q) => ({
+  id: nextId("tq"),
+  createdTime: "2026-09-02T11:00:00.000Z",
+  fields: {
+    QuestionText: q.text,
+    Template: [posWalkaroundTemplateId],
+    Section: q.section,
+    OrderIndex: q.order,
+    QuestionNumber: q.qnum,
+    AnswerType: q.answerType,
+    OptionsNotes: q.options || undefined,
+    Required: !!q.required,
+    ScopeType: "AllSites",
+  },
+}));
+
+const templateQuestions: Rec[] = [...hsTemplateQuestions, ...posWalkaroundTemplateQuestions];
+
+const tqByQnum = (n: number) => hsTemplateQuestions.find((t) => t.fields.QuestionNumber === n)!;
 
 const rosters: Rec[] = [
   { id: nextId("ros"), createdTime: "2026-08-31T09:00:00.000Z", fields: { RosterName: "H&S Reps - Company-wide", Role: "H&S Rep", Scope: "Company-wide", Names: "Justin, Ashley, Gavin, Chloe", TemplateQuestions: [tqByQnum(11).id], Confirmed: false } },

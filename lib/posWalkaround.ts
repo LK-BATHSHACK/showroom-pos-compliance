@@ -25,6 +25,10 @@ import { loadSharedContext, processAuditSubmission, type ProcessedAuditResult } 
 export type PosFieldType = "text" | "date" | "radio" | "checkbox" | "photo";
 
 export type PosQuestion = {
+  // Airtable Template Question record id - present when sourced from
+  // fetchPOSQuestions() (i.e. always, at runtime); optional only so ad-hoc
+  // test fixtures don't need to invent one.
+  id?: string;
   qnum: number;
   section: string;
   text: string;
@@ -43,72 +47,100 @@ export type PosQuestion = {
   referenceImageUrl?: string;
 };
 
-// Q2 ("Which showroom are you reporting for?") is answered implicitly by
-// the showroom-selection step of this flow (a picker for Admin/Marketing,
-// locked to the site's own showroom for Store Managers) - same pattern as
-// H&S's Q3, so it isn't rendered as a form question here.
-export const POS_WALKAROUND_QUESTIONS: PosQuestion[] = [
-  { qnum: 1, section: "Details", text: "Date", type: "date", required: true },
-  { qnum: 3, section: "Details", text: "Your name and role", type: "text", required: true },
-  { qnum: 4, section: "Details", text: "How many customer-facing terminals does your showroom have?", type: "text", required: true },
+const POS_TEMPLATE_NAME = "POS Walkaround";
 
-  { qnum: 5, section: "Bay POS", text: "Tile samples - does every sample have a completed label (code, description, price, box qty)?", type: "radio", required: true, options: [
-    "Yes - all tile samples are labelled",
-    "Mostly - some are missing or incomplete",
-    "No - most are missing labels",
-  ] },
-  { qnum: 6, section: "Bay POS", text: "Upload a photo showing tile labels in use", type: "photo", helpText: "Optional, but helps evidence Q5." },
-  { qnum: 7, section: "Bay POS", text: "Does every bay have the numbered duck sticker in place?", type: "radio", required: true, options: [
-    "Yes - all bays have their numbered duck sticker",
-    "Some are missing",
-    "No - most are missing",
-  ] },
+// qnum -> helpText/referenceImageUrl, kept in code rather than Airtable's
+// OptionsNotes/QuestionText (2 Sep 2026, admin question editor build):
+// these are presentational only, not part of what an H&S/Admin editor
+// should be able to change, and keeping the image paths out of a free-text
+// Airtable field means they can't be typo'd into a 404 by an edit. The
+// editable stuff (question text, options, required, order) now lives in
+// the Template Questions table - see fetchPOSQuestions() below.
+const POS_REFERENCE_META: Record<number, { helpText?: string; referenceImageUrl?: string }> = {
+  6: { helpText: "Optional, but helps evidence Q5." },
+  11: { referenceImageUrl: "/pos-reference/q11-showroom-exclusives-frame.jpg" },
+  12: { referenceImageUrl: "/pos-reference/q12-tile-specials-leaflets.jpg" },
+  13: { helpText: "General evidence - doesn't need to be tied to one specific item." },
+  15: { referenceImageUrl: "/pos-reference/q15-trustpilot-poster.jpg" },
+  18: { referenceImageUrl: "/pos-reference/q18-returns-policy-poster.jpg" },
+  19: { helpText: "General evidence - doesn't need to be tied to one specific item." },
+  20: { referenceImageUrl: "/pos-reference/q20-trustpilot-tent-cards.jpg" },
+  21: { referenceImageUrl: "/pos-reference/q21-trustpilot-stickers.jpg" },
+  24: { referenceImageUrl: "/pos-reference/q24-toilet-roll-stickers.jpg" },
+  26: { referenceImageUrl: "/pos-reference/q26-children-supervised-sign.jpg" },
+  28: { helpText: "General evidence - doesn't need to be tied to one specific item." },
+  29: { helpText: 'Leave blank if nothing to add - creates a "New Idea" POS Request if filled in.' },
+  30: { helpText: 'Leave blank if nothing to add - creates a "Replacement/Support Request" POS Request if filled in.' },
+};
 
-  { qnum: 8, section: "Sales POS", text: "Duck Sale Wobblers - do you have enough? (min. 10)", type: "radio", required: true, options: ["Yes - we have enough (10+)", "No - we need more"] },
-  { qnum: 9, section: "Sales POS", text: "Star Wobblers - do you have enough? (NI: 10, ROI: 4)", type: "radio", required: true, options: ["Yes - we have enough", "No - we need more"] },
-  { qnum: 10, section: "Sales POS", text: "A3 Sale Posters & Displays - do you have enough?", type: "radio", required: true, options: [
-    "Yes - we have the right amount",
-    "No - we need more posters",
-    "No - we need more displays",
-  ] },
-  { qnum: 11, section: "Sales POS", text: "Showroom Exclusives A1 frame and easel - is it up, in good condition, and does it have a plant?", type: "checkbox", required: true, options: [
-    "Yes",
-    "No - need frame",
-    "No - need easel",
-    "No - need plant",
-  ], referenceImageUrl: "/pos-reference/q11-showroom-exclusives-frame.jpg" },
-  { qnum: 12, section: "Sales POS", text: "Tile Specials Leaflets - do you have enough? (30x)", type: "radio", required: true, options: ["Yes - we have enough (30+)", "No - we need more"], referenceImageUrl: "/pos-reference/q12-tile-specials-leaflets.jpg" },
-  { qnum: 13, section: "Sales POS", text: "Upload a photo of sales POS in action", type: "photo", helpText: "General evidence - doesn't need to be tied to one specific item." },
+function splitOptions(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  return raw.split(";").map((s) => s.trim()).filter(Boolean);
+}
 
-  { qnum: 14, section: "Customer-Facing Terminals", text: "Are 3x awards displayed at each terminal?", type: "radio", required: true, options: ["Yes", "No"] },
-  { qnum: 15, section: "Customer-Facing Terminals", text: "Trustpilot Poster/Sign - do you have enough? (4x)", type: "radio", required: true, options: ["Yes", "No"], referenceImageUrl: "/pos-reference/q15-trustpilot-poster.jpg" },
-  { qnum: 16, section: "Customer-Facing Terminals", text: "Price Promise Poster/Sign - do you have enough? (5x)", type: "radio", required: true, options: ["Yes", "No"] },
-  { qnum: 17, section: "Customer-Facing Terminals", text: "QR code review cards & business cards - are both in place at every terminal?", type: "checkbox", required: true, options: [
-    "Yes",
-    "No - missing QR code review cards",
-    "No - missing business cards",
-  ] },
-  { qnum: 18, section: "Customer-Facing Terminals", text: "Is the Returns Policy Poster displayed?", type: "radio", required: true, options: ["Yes", "No"], referenceImageUrl: "/pos-reference/q18-returns-policy-poster.jpg" },
-  { qnum: 19, section: "Customer-Facing Terminals", text: "Upload a photo of a customer-facing terminal with correct POS", type: "photo", helpText: "General evidence - doesn't need to be tied to one specific item." },
+function answerTypeToFieldType(answerType: string | undefined): PosFieldType {
+  switch (answerType) {
+    case "Date":
+      return "date";
+    case "Single choice":
+      return "radio";
+    case "Multiple choice (checkboxes)":
+      return "checkbox";
+    case "File upload":
+      return "photo";
+    case "Short answer":
+    case "Long answer":
+    default:
+      return "text";
+  }
+}
 
-  { qnum: 20, section: "Rest of Showroom", text: "Trustpilot Review Tent Cards - do you have enough? (9x)", type: "radio", required: true, options: ["Yes", "No"], referenceImageUrl: "/pos-reference/q20-trustpilot-tent-cards.jpg" },
-  { qnum: 21, section: "Rest of Showroom", text: "Are Trustpilot Review Stickers displayed?", type: "radio", required: true, options: ["Yes", "No"], referenceImageUrl: "/pos-reference/q21-trustpilot-stickers.jpg" },
-  { qnum: 22, section: "Rest of Showroom", text: "Framed Bathroom Photos - do you have enough? (10x)", type: "radio", required: true, options: ["Yes", "No"] },
-  { qnum: 23, section: "Rest of Showroom", text: "Is the Toilet Cleaning Rota up to date?", type: "radio", required: true, options: ["Yes", "No"] },
-  { qnum: 24, section: "Rest of Showroom", text: "Are toilet roll stickers in place?", type: "radio", required: true, options: ["Yes", "No"], referenceImageUrl: "/pos-reference/q24-toilet-roll-stickers.jpg" },
-  { qnum: 25, section: "Rest of Showroom", text: "Showroom scent - is everything present and topped up? (3x diffusers, 1x oil, 1x room spray)", type: "checkbox", required: true, options: [
-    "Yes",
-    "No - need diffuser(s)",
-    "No - need oil",
-    "No - need room spray",
-  ] },
-  { qnum: 26, section: "Rest of Showroom", text: "Children Must Be Supervised Signs - do you have enough? (4x)", type: "radio", required: true, options: ["Yes", "No"], referenceImageUrl: "/pos-reference/q26-children-supervised-sign.jpg" },
-  { qnum: 27, section: "Rest of Showroom", text: "Are the TV Slideshows working and up to date?", type: "radio", required: true, options: ["Yes", "No - support needed"] },
-  { qnum: 28, section: "Rest of Showroom", text: "Upload 1-3 photos of general showroom POS in action", type: "photo", helpText: "General evidence - doesn't need to be tied to one specific item." },
+// Live source of the 29-question form (formerly a hardcoded array - moved
+// to Airtable 2 Sep 2026 so Admin/H&S can edit question text, options,
+// required, and order the same way H&S's questions already are: "for admin
+// login only pencil to edit the question and a button to add new question
+// on both POS and H&S"). Scoring (SCORE_RULES below) still keys off qnum
+// and matches option VALUES exactly - editing an option's wording here can
+// silently break scoring for that question, same caveat as H&S.
+export async function fetchPOSQuestions(): Promise<PosQuestion[]> {
+  const [templates, questions] = await Promise.all([
+    listRecords<{ TemplateName: string }>(TABLES.CHECKLIST_TEMPLATES),
+    listRecords<{
+      QuestionText: string;
+      Template?: string[];
+      Section?: string;
+      OrderIndex?: number;
+      QuestionNumber?: number;
+      AnswerType?: string;
+      OptionsNotes?: string;
+      Required?: boolean;
+    }>(TABLES.TEMPLATE_QUESTIONS),
+  ]);
 
-  { qnum: 29, section: "Feedback & New Ideas", text: "Are you in need of any POS assets which aren't on this list? All ideas welcome.", type: "text", helpText: "Leave blank if nothing to add - creates a \"New Idea\" POS Request if filled in." },
-  { qnum: 30, section: "Feedback & New Ideas", text: "Do you require any other support or replacement assets?", type: "text", helpText: "Leave blank if nothing to add - creates a \"Replacement/Support Request\" POS Request if filled in." },
-];
+  const posTemplate = templates.find((t) => t.fields.TemplateName === POS_TEMPLATE_NAME);
+  if (!posTemplate) throw new Error(`Checklist Template "${POS_TEMPLATE_NAME}" not found.`);
+
+  return questions
+    .filter((q) => q.fields.Template?.includes(posTemplate.id))
+    .map((q) => {
+      const qnum = q.fields.QuestionNumber ?? 0;
+      const meta = POS_REFERENCE_META[qnum] || {};
+      return {
+        id: q.id,
+        qnum,
+        section: q.fields.Section || "",
+        text: q.fields.QuestionText,
+        type: answerTypeToFieldType(q.fields.AnswerType),
+        options: splitOptions(q.fields.OptionsNotes),
+        required: !!q.fields.Required,
+        helpText: meta.helpText,
+        referenceImageUrl: meta.referenceImageUrl,
+        _order: q.fields.OrderIndex ?? qnum,
+      };
+    })
+    .sort((a, b) => a._order - b._order)
+    .map(({ _order, ...q }) => q);
+}
 
 type ScoreRule =
   | { kind: "radio"; posName: string; missingOptions: string[] }

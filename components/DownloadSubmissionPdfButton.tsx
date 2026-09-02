@@ -51,8 +51,16 @@ export type SubmissionPdfProps = {
   sections: SubmissionPdfSection[];
 };
 
-function buildSubmissionPdf(props: SubmissionPdfProps): jsPDF {
-  const doc = new jsPDF({ unit: "pt", format: "a4" });
+// Exported (not just used internally) so DownloadStorePdfButton.tsx can
+// draw several submissions' worth of pages into ONE combined jsPDF instance
+// (Lorraine, 2 Sep 2026: "download PDF must be able to download individual
+// results for each store" -> "one combined PDF per store, all its
+// submissions") rather than each submission starting its own document -
+// pass an existing `doc` in and this appends a new page before drawing,
+// instead of creating a fresh one.
+export function buildSubmissionPdf(props: SubmissionPdfProps, existingDoc?: jsPDF): jsPDF {
+  const doc = existingDoc || new jsPDF({ unit: "pt", format: "a4" });
+  if (existingDoc) doc.addPage();
   const pageWidth = doc.internal.pageSize.getWidth();
 
   doc.setFillColor(...BRAND_PINK);

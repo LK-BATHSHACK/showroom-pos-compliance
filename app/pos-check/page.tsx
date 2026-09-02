@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { requireRole } from "@/lib/auth";
-import { fetchPosShowrooms, resolveShowroomForSite, type ShowroomForSite } from "@/lib/posWalkaround";
+import { fetchPosShowrooms, fetchPOSQuestions, resolveShowroomForSite, type ShowroomForSite } from "@/lib/posWalkaround";
 import UploadTabs from "@/components/UploadTabs";
 
 export const dynamic = "force-dynamic";
@@ -9,7 +9,10 @@ export default async function UploadPage() {
   const session = await requireRole(["Admin", "Marketing", "Store Manager"]);
   if (!session) redirect("/login");
 
-  const showrooms = session.role === "Store Manager" ? [] : await fetchPosShowrooms();
+  const [showrooms, questions] = await Promise.all([
+    session.role === "Store Manager" ? Promise.resolve([]) : fetchPosShowrooms(),
+    fetchPOSQuestions(),
+  ]);
 
   // Store Managers submit only for their own site's showroom - no picker,
   // resolved server-side via Sites.SourceShowroom (see lib/posWalkaround.ts)
@@ -52,6 +55,7 @@ export default async function UploadPage() {
         lockedShowroomError={lockedShowroomError}
         submittedByName={session.name}
         showExcelTab={session.role !== "Store Manager"}
+        questions={questions}
       />
     </div>
   );

@@ -120,6 +120,23 @@ export default function HSWalkaroundForm({
     return Array.from(map.entries());
   }, [questions]);
 
+  // Each section's [first, last] position in the whole scoped question set
+  // (NOT the Airtable QuestionNumber, which is scoped-out-of-order by
+  // design - e.g. a Showroom site skips Q4-9 and Posters, Visuals &
+  // Documents starts at Q10). Lorraine, 2 Sep 2026: "the question numbers
+  // read funny... is there a better way to lay this out?" - kept Q<n> as
+  // the reference number (it's what's used in admin/Actions/PDFs/emails and
+  // what people already say to each other) but added this running "Question
+  // X of Y" so a jump like Q2 -> Q10 doesn't read as something missing.
+  const questionRanges = useMemo(() => {
+    let idx = 0;
+    return sections.map(([, qs]) => {
+      const start = idx + 1;
+      idx += qs.length;
+      return [start, idx] as const;
+    });
+  }, [sections]);
+
   const qnumToId = useMemo(() => {
     const m = new Map<number, string>();
     questions?.forEach((q) => {
@@ -357,6 +374,15 @@ export default function HSWalkaroundForm({
         <>
           <div style={{ marginTop: 20, marginBottom: 10, fontSize: 13, color: "#6E6E6E" }}>
             Section {currentSection + 1} of {sections.length}
+            {questionRanges[currentSection] && (
+              <>
+                {" "}&middot; Question{questionRanges[currentSection][0] === questionRanges[currentSection][1] ? "" : "s"}{" "}
+                {questionRanges[currentSection][0] === questionRanges[currentSection][1]
+                  ? questionRanges[currentSection][0]
+                  : `${questionRanges[currentSection][0]}-${questionRanges[currentSection][1]}`}{" "}
+                of {questions?.length}
+              </>
+            )}
           </div>
           <div style={{ display: "flex", gap: 4, marginBottom: 16, flexWrap: "wrap" }}>
             {sections.map(([section], i) => (
@@ -629,16 +655,20 @@ function QuestionField({
     <div id={`q-${q.id}`} style={{ marginBottom: 22, paddingBottom: 4 }}>
       {label}
       {q.referenceImages.length > 0 && (
-        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 10 }}>
+        // Bigger than before (110px -> 200px) so a poster's text is
+        // actually readable without clicking through (Lorraine, 2 Sep
+        // 2026: "I would make the images bigger so they can be read
+        // easier") - still click-through to the full-size original.
+        <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 12 }}>
           {q.referenceImages.map((img) => (
             <a key={img.url} href={img.url} target="_blank" rel="noopener noreferrer" style={{ display: "inline-block" }}>
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={img.url}
                 alt={img.caption ? `What this should look like - ${img.caption}` : "What this should look like"}
-                style={{ width: 110, height: 110, objectFit: "cover", borderRadius: 6, border: "1px solid #ddd", display: "block" }}
+                style={{ width: 200, height: 200, objectFit: "cover", borderRadius: 8, border: "1px solid #ddd", display: "block" }}
               />
-              <div style={{ fontSize: 11, color: "#3348B0", marginTop: 3, maxWidth: 110 }}>{img.caption || "What this should look like"}</div>
+              <div style={{ fontSize: 12, color: "#3348B0", marginTop: 4, maxWidth: 200 }}>{img.caption || "What this should look like"}</div>
             </a>
           ))}
         </div>
