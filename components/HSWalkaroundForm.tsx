@@ -32,6 +32,33 @@ type TemplateQuestion = {
 const MAX_FILE_BYTES = 5 * 1024 * 1024;
 const MAX_FILES_PER_QUESTION = 10;
 
+// ---------------------------------------------------------------------------
+// Branching (Salli, 2 Sep 2026: "Q6 - if they say NO - could it remove Q7?
+// like branching would on a MS Form?"). Q7 only makes sense if Q6 says
+// there IS equipment on site; Q17 only makes sense if Q16 says the
+// bins/food-waste schedule ISN'T in place. Both companion questions had
+// their Airtable "Required" flag turned off (was unconditionally true
+// before, which was its own bug - Salli: "Q17 - it's saying required
+// whether I click yes or no on Q16") - this is what makes them required,
+// and shown at all, exactly when the branch condition is met. Same idea as
+// MS Forms branching, done in the client since Airtable's schema has no
+// concept of conditional questions.
+// ---------------------------------------------------------------------------
+const CONDITIONAL_QUESTIONS: Record<number, { dependsOnQnum: number; showWhen: (answer: string) => boolean }> = {
+  7: { dependsOnQnum: 6, showWhen: (a) => a === "Yes" },
+  17: { dependsOnQnum: 16, showWhen: (a) => a === "No" },
+};
+
+// Matrix questions (Fire Warden Duties, Warehouse material handling) each
+// have their own section's free-text "report an issue" question - Salli
+// asked for a pointer to it right under the matrix when someone ticks "No"
+// on anything ("if they click no - there isn't anywhere that pops up for
+// them to state the problem? or for it to say - you can tell us the
+// problem in Q9?", 2 Sep 2026). Q5 (Warehouse) -> Q9, Q35 (Fire Warden) ->
+// Q40 - both are that section's own catch-all, same pattern, just two
+// different question numbers because they're in different sections.
+const MATRIX_ISSUE_POINTER: Record<number, number> = { 5: 9, 35: 40 };
+
 export default function HSWalkaroundForm({
   sites,
   lockedSite,
@@ -53,6 +80,16 @@ export default function HSWalkaroundForm({
   const [result, setResult] = useState<any>(null);
   const [submitError, setSubmitError] = useState("");
 
+  // Sectioned/paginated walkthrough (Salli, 2 Sep 2026: "Instead of it
+  // scrolling down miles - can it be done in Sections that appear as one is
+  // completed a new one appears? so they don't have to scroll much? and
+  // also if they miss a question, it's not obvious until they get all the
+  // way to the end.") - one section on screen at a time, Next validates
+  // that section before moving on, so a missed required question is caught
+  // immediately rather than only at final submit.
+  const [currentSection, setCurrentSection] = useState(0);
+  const [pendingScrollId, setPendingScrollId] = useState<string | null>(null);
+
   useEffect(() => {
     if (!siteId) {
       setQuestions(null);
@@ -68,6 +105,7 @@ export default function HSWalkaroundForm({
         setMultiAnswers({});
         setFileAnswers({});
         setResult(null);
+        setCurrentSection(0);
       })
       .finally(() => setLoadingQuestions(false));
   }, [siteId]);
@@ -81,6 +119,32 @@ export default function HSWalkaroundForm({
     });
     return Array.from(map.entries());
   }, [questions]);
+
+  const qnumToId = useMemo(() => {
+    const m = new Map<number, string>();
+    questions?.forEach((q) => {
+      if (q.qnum) m.set(q.qnum, q.id);
+    });
+    return m;
+  }, [questions]);
+
+  function answerForQnum(qn: number): string {
+    const id = qnumToId.get(qn);
+    return id ? answers[id] || "" : "";
+  }
+
+  function isVisible(q: TemplateQuestion): boolean {
+    const cond = q.qnum ? CONDITIONAL_QUESTIONS[q.qnum] : undefined;
+    if (!cond) return true;
+    return cond.showWhen(answerForQnum(cond.dependsOnQnum));
+  }
+
+  function isRequired(q: TemplateQuestion): boolean {
+    // A conditional question is required exactly when it's shown - that's
+    // what makes it "branching" rather than just an always-optional field.
+    if (q.qnum && CONDITIONAL_QUESTIONS[q.qnum]) return isVisible(q);
+    return q.required;
+  }
 
   function setAnswer(q: TemplateQuestion, value: string) {
     setAnswers((prev) => ({ ...prev, [q.id]: value }));
@@ -138,33 +202,65 @@ export default function HSWalkaroundForm({
     return answers[q.id] || "";
   }
 
+  // Validates a set of questions (a single section, or everything at final
+  // submit) - skips anything currently hidden by branching, and skips File
+  // upload's "required" (photos are optional; a rejected-file message
+  // should still block though).
+  function validate(qs: TemplateQuestion[]): Record<string, string> {
+    const newErrors: Record<string, string> = {};
+    qs.forEach((q) => {
+      if (!isVisible(q)) return;
+      if (q.answerType === "File upload") {
+        if (errors[q.id]) newErrors[q.id] = errors[q.id];
+        return;
+      }
+      if (isRequired(q) && !finalValueFor(q).trim()) {
+        newErrors[q.id] = "This is required.";
+      }
+    });
+    return newErrors;
+  }
+
+  function goToSection(index: number) {
+    setCurrentSection(index);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function handleNext() {
+    const [, qs] = sections[currentSection];
+    const sectionErrors = validate(qs);
+    if (Object.keys(sectionErrors).length > 0) {
+      setErrors((prev) => ({ ...prev, ...sectionErrors }));
+      const firstId = qs.find((q) => sectionErrors[q.id])?.id;
+      if (firstId) setPendingScrollId(firstId);
+      return;
+    }
+    goToSection(currentSection + 1);
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!questions || !siteId) return;
 
-    const newErrors: Record<string, string> = {};
-    questions.forEach((q) => {
-      if (q.answerType === "File upload") {
-        // Never blocks on "required" - photos are optional, with an
-        // email-photos-directly fallback shown under the field - but a
-        // rejected-file message from setFiles() (too big / too many)
-        // should still stop submission until it's cleared.
-        if (errors[q.id]) newErrors[q.id] = errors[q.id];
-        return;
-      }
-      if (q.required && !finalValueFor(q).trim()) {
-        newErrors[q.id] = "This is required.";
-      }
-    });
+    const newErrors = validate(questions);
     if (Object.keys(newErrors).length > 0) {
       setErrors(newErrors);
-      const firstId = Object.keys(newErrors)[0];
-      document.getElementById(`q-${firstId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+      const firstErrorQ = questions.find((q) => newErrors[q.id]);
+      if (firstErrorQ) {
+        const sectionIndex = sections.findIndex(([, qs]) => qs.some((q) => q.id === firstErrorQ.id));
+        if (sectionIndex >= 0 && sectionIndex !== currentSection) {
+          setCurrentSection(sectionIndex);
+        }
+        setPendingScrollId(firstErrorQ.id);
+      }
       return;
     }
 
     setSubmitting(true);
     setSubmitError("");
+    // Hidden (branched-away) questions are still sent with whatever value
+    // they hold (usually blank) - the server only persists answers to
+    // questions it recognises as applicable, same as always.
     const payload = {
       siteId,
       answers: questions.map((q) => ({ questionId: q.id, value: finalValueFor(q) })),
@@ -187,6 +283,15 @@ export default function HSWalkaroundForm({
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
+  useEffect(() => {
+    if (!pendingScrollId) return;
+    const el = document.getElementById(`q-${pendingScrollId}`);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      setPendingScrollId(null);
+    }
+  }, [pendingScrollId, currentSection]);
+
   if (result) {
     return (
       <Card>
@@ -208,6 +313,7 @@ export default function HSWalkaroundForm({
             setSiteId(lockedSite?.id || "");
             setQuestions(null);
             setFileAnswers({});
+            setCurrentSection(0);
           }}
           style={{ background: "#E6017E", color: "#fff", border: "none", borderRadius: 6, padding: "10px 20px", fontSize: 14, fontWeight: 600, cursor: "pointer" }}
         >
@@ -216,6 +322,9 @@ export default function HSWalkaroundForm({
       </Card>
     );
   }
+
+  const activeSection = sections[currentSection];
+  const isLastSection = currentSection === sections.length - 1;
 
   return (
     <form onSubmit={handleSubmit}>
@@ -228,7 +337,11 @@ export default function HSWalkaroundForm({
         ) : (
           <div>
             <label style={{ display: "block", fontSize: 13, color: "#6E6E6E", marginBottom: 6 }}>Which site?</label>
-            <select value={siteId} onChange={(e) => setSiteId(e.target.value)} style={{ padding: "10px 12px", border: "1px solid #ccc", borderRadius: 6, fontSize: 15, minWidth: 280 }}>
+            <select
+              value={siteId}
+              onChange={(e) => setSiteId(e.target.value)}
+              style={{ padding: "10px 12px", border: "1px solid #ccc", borderRadius: 6, fontSize: 15, width: "100%", maxWidth: 340 }}
+            >
               <option value="">Select a site...</option>
               {sites.map((s) => (
                 <option key={s.id} value={s.id}>{s.name}</option>
@@ -240,47 +353,121 @@ export default function HSWalkaroundForm({
 
       {loadingQuestions && <p style={{ color: "#6E6E6E", marginTop: 20 }}>Loading questions for this site...</p>}
 
-      {sections.map(([section, qs]) => (
-        <div key={section} style={{ marginTop: 20 }}>
-          <Card title={section}>
-            {qs.map((q) => (
-              <QuestionField
-                key={q.id}
-                q={q}
-                value={answers[q.id] || ""}
-                matrixValue={matrixAnswers[q.id] || {}}
-                multiValue={multiAnswers[q.id] || []}
-                fileValue={fileAnswers[q.id] || []}
-                error={errors[q.id]}
-                onChange={(v) => setAnswer(q, v)}
-                onMatrixChange={(sub, v) => setMatrixSub(q, sub, v)}
-                onMultiToggle={(opt, checked) => toggleMulti(q, opt, checked)}
-                onFilesChange={(fl) => setFiles(q, fl)}
-                onFileRemove={(i) => removeFile(q, i)}
+      {sections.length > 0 && (
+        <>
+          <div style={{ marginTop: 20, marginBottom: 10, fontSize: 13, color: "#6E6E6E" }}>
+            Section {currentSection + 1} of {sections.length}
+          </div>
+          <div style={{ display: "flex", gap: 4, marginBottom: 16, flexWrap: "wrap" }}>
+            {sections.map(([section], i) => (
+              <div
+                key={section}
+                title={section}
+                style={{
+                  height: 4,
+                  flex: 1,
+                  minWidth: 12,
+                  borderRadius: 2,
+                  background: i <= currentSection ? "#E6017E" : "#E0E0E0",
+                }}
               />
             ))}
-          </Card>
-        </div>
-      ))}
+          </div>
 
-      {questions && questions.length > 0 && (
-        <div style={{ marginTop: 20, marginBottom: 40 }}>
-          {submitError && <div style={{ color: "#d03b3b", fontSize: 13, marginBottom: 12 }}>{submitError}</div>}
-          <button
-            type="submit"
-            disabled={submitting}
-            style={{ background: "#E6017E", color: "#fff", border: "none", borderRadius: 6, padding: "12px 28px", fontSize: 15, fontWeight: 600, cursor: "pointer" }}
-          >
-            {submitting ? "Submitting..." : "Submit walkaround"}
-          </button>
-        </div>
+          <Card title={activeSection[0]}>
+            {activeSection[1].map((q) => {
+              if (!isVisible(q)) return null;
+              return (
+                <QuestionField
+                  key={q.id}
+                  q={q}
+                  required={isRequired(q)}
+                  value={answers[q.id] || ""}
+                  matrixValue={matrixAnswers[q.id] || {}}
+                  multiValue={multiAnswers[q.id] || []}
+                  fileValue={fileAnswers[q.id] || []}
+                  error={errors[q.id]}
+                  onChange={(v) => setAnswer(q, v)}
+                  onMatrixChange={(sub, v) => setMatrixSub(q, sub, v)}
+                  onMultiToggle={(opt, checked) => toggleMulti(q, opt, checked)}
+                  onFilesChange={(fl) => setFiles(q, fl)}
+                  onFileRemove={(i) => removeFile(q, i)}
+                />
+              );
+            })}
+          </Card>
+
+          <div style={{ marginTop: 20, marginBottom: 40, display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+            {currentSection > 0 && (
+              <button
+                type="button"
+                onClick={() => goToSection(currentSection - 1)}
+                style={{ background: "#fff", color: "#1D1C1D", border: "1px solid #ccc", borderRadius: 6, padding: "12px 22px", fontSize: 15, fontWeight: 600, cursor: "pointer" }}
+              >
+                Back
+              </button>
+            )}
+            {!isLastSection && (
+              <button
+                type="button"
+                onClick={handleNext}
+                style={{ background: "#E6017E", color: "#fff", border: "none", borderRadius: 6, padding: "12px 28px", fontSize: 15, fontWeight: 600, cursor: "pointer" }}
+              >
+                Next
+              </button>
+            )}
+            {isLastSection && (
+              <button
+                type="submit"
+                disabled={submitting}
+                style={{ background: "#E6017E", color: "#fff", border: "none", borderRadius: 6, padding: "12px 28px", fontSize: 15, fontWeight: 600, cursor: "pointer" }}
+              >
+                {submitting ? "Submitting..." : "Submit walkaround"}
+              </button>
+            )}
+            {submitError && <div style={{ color: "#d03b3b", fontSize: 13, width: "100%" }}>{submitError}</div>}
+          </div>
+        </>
       )}
     </form>
   );
 }
 
+// Turns bare http(s):// URLs in question text into real clickable links
+// (Salli, 2 Sep 2026: "Can we get the links to work as links or not
+// possible?") - several questions (Q8, Q27, Q36, Q59) include a raw
+// SharePoint/MS Forms URL in the text. Trailing punctuation (a "." ending
+// the sentence, a closing bracket) is kept outside the link rather than
+// swallowed into the href.
+function linkify(text: string): React.ReactNode[] {
+  const regex = /(https?:\/\/[^\s]+)/g;
+  const parts: React.ReactNode[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  let key = 0;
+  while ((match = regex.exec(text))) {
+    let url = match[0];
+    let trailing = "";
+    while (url.length > 0 && /[.,;:)\]}'"]$/.test(url)) {
+      trailing = url.slice(-1) + trailing;
+      url = url.slice(0, -1);
+    }
+    if (match.index > lastIndex) parts.push(text.slice(lastIndex, match.index));
+    parts.push(
+      <a key={key++} href={url} target="_blank" rel="noopener noreferrer" style={{ color: "#3348B0", wordBreak: "break-all" }}>
+        {url}
+      </a>
+    );
+    if (trailing) parts.push(trailing);
+    lastIndex = match.index + match[0].length;
+  }
+  if (lastIndex < text.length) parts.push(text.slice(lastIndex));
+  return parts;
+}
+
 function QuestionField({
   q,
+  required,
   value,
   matrixValue,
   multiValue,
@@ -293,6 +480,7 @@ function QuestionField({
   onFileRemove,
 }: {
   q: TemplateQuestion;
+  required: boolean;
   value: string;
   matrixValue: Record<string, string>;
   multiValue: string[];
@@ -307,12 +495,13 @@ function QuestionField({
   const label = (
     <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 8, whiteSpace: "pre-wrap" }}>
       {q.qnum ? `Q${q.qnum}. ` : ""}
-      {q.text}
-      {q.required && <span style={{ color: "#E6017E" }}> *</span>}
+      {linkify(q.text)}
+      {required && <span style={{ color: "#E6017E" }}> *</span>}
     </div>
   );
 
   let field: React.ReactNode;
+  let matrixHint: React.ReactNode = null;
 
   switch (q.answerType) {
     case "Short answer":
@@ -322,11 +511,13 @@ function QuestionField({
       field = <textarea value={value} onChange={(e) => onChange(e.target.value)} rows={3} style={{ ...inputStyle, resize: "vertical" as const }} />;
       break;
     case "Date":
+      // Already a native browser date picker (desktop and mobile both show
+      // their own calendar UI for type="date" - nothing to build here).
       field = <input type="date" value={value} onChange={(e) => onChange(e.target.value)} style={inputStyle} />;
       break;
     case "Yes/No":
       field = (
-        <div style={{ display: "flex", gap: 16 }}>
+        <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
           {["Yes", "No"].map((opt) => (
             <label key={opt} style={radioLabelStyle}>
               <input type="radio" name={q.id} checked={value === opt} onChange={() => onChange(opt)} /> {opt}
@@ -357,27 +548,44 @@ function QuestionField({
         </div>
       );
       break;
-    case "Matrix":
+    case "Matrix": {
+      // Radio buttons instead of a per-row dropdown (Salli, 2 Sep 2026: "Is
+      // there a way to have a radio button instead of a dropdown box - less
+      // clicks") - same Yes/No/Covered elsewhere options, just fewer taps
+      // to answer each row on a phone.
+      const anyNo = q.options.some((sub) => matrixValue[sub] === "No");
+      const pointerQnum = q.qnum ? MATRIX_ISSUE_POINTER[q.qnum] : undefined;
       field = (
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
           {q.options.map((sub) => (
-            <div key={sub} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, borderBottom: "1px solid #f2f2f2", paddingBottom: 8 }}>
-              <div style={{ fontSize: 13, flex: 1 }}>{sub}</div>
-              <select
-                value={matrixValue[sub] || ""}
-                onChange={(e) => onMatrixChange(sub, e.target.value)}
-                style={{ ...inputStyle, width: 180 }}
-              >
-                <option value="">Select...</option>
-                <option value="Yes">Yes</option>
-                <option value="No">No</option>
-                <option value="Covered elsewhere">Covered elsewhere</option>
-              </select>
+            <div key={sub} style={{ borderBottom: "1px solid #f2f2f2", paddingBottom: 10 }}>
+              <div style={{ fontSize: 13, marginBottom: 6 }}>{sub}</div>
+              <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+                {["Yes", "No", "Covered elsewhere"].map((opt) => (
+                  <label key={opt} style={radioLabelStyle}>
+                    <input
+                      type="radio"
+                      name={`${q.id}__${sub}`}
+                      checked={matrixValue[sub] === opt}
+                      onChange={() => onMatrixChange(sub, opt)}
+                    />{" "}
+                    {opt}
+                  </label>
+                ))}
+              </div>
             </div>
           ))}
         </div>
       );
+      if (anyNo && pointerQnum) {
+        matrixHint = (
+          <div style={{ fontSize: 12, color: "#966400", background: "#FFF4E0", borderRadius: 6, padding: "8px 10px", marginTop: 10 }}>
+            Answered "No" to any of these? Please give the details in Q{pointerQnum} below.
+          </div>
+        );
+      }
       break;
+    }
     case "File upload":
       field = (
         <div>
@@ -397,7 +605,7 @@ function QuestionField({
           {fileValue.length > 0 && (
             <ul style={{ marginTop: 8, paddingLeft: 18, fontSize: 13 }}>
               {fileValue.map((f, i) => (
-                <li key={`${f.name}-${i}`} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <li key={`${f.name}-${i}`} style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                   <span>{f.name} ({(f.size / 1024 / 1024).toFixed(1)}MB)</span>
                   <button
                     type="button"
@@ -436,6 +644,7 @@ function QuestionField({
         </div>
       )}
       {field}
+      {matrixHint}
       {error && <div style={{ color: "#d03b3b", fontSize: 12, marginTop: 4 }}>{error}</div>}
     </div>
   );

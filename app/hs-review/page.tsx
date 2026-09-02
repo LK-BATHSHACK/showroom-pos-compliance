@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { requireRole } from "@/lib/auth";
 import { listRecords, TABLES } from "@/lib/airtable";
 import { Card, KpiCard } from "@/components/ui";
+import DownloadLogPdfButton from "@/components/DownloadLogPdfButton";
 
 export const dynamic = "force-dynamic";
 
@@ -37,7 +38,7 @@ export default async function HSReviewPage({
       DateIdentified?: string;
     }>(TABLES.ACTIONS),
     listRecords<{ TemplateQuestion?: string[]; Submission?: string[] }>(TABLES.ANSWERS),
-    listRecords<{ Template?: string[] }>(TABLES.TEMPLATE_QUESTIONS),
+    listRecords<{ Template?: string[]; QuestionNumber?: number; QuestionText?: string }>(TABLES.TEMPLATE_QUESTIONS),
   ]);
 
   const hsTemplate = templates.find((t) => t.fields.TemplateName === HS_TEMPLATE_NAME);
@@ -48,6 +49,23 @@ export default async function HSReviewPage({
   const hsActions = actions.filter((a) => (a.fields.SourceAnswer || []).some((aid) => hsAnswerIds.has(aid)));
 
   const siteName = (id?: string) => sites.find((s) => s.id === id)?.fields.SiteName || "-";
+
+  // Action -> Answer -> TemplateQuestion join, so the Open Follow-up Actions
+  // table can show which question an issue came from even when the text
+  // itself is vague (Salli, 2 Sep 2026: "there is an issue that just says
+  // no - I'm not sure which question that relates to"). Read-time join
+  // rather than baking the question number into every IssueDescription, so
+  // it also covers submissions from before this fix.
+  const answerById = new Map(answers.map((a) => [a.id, a]));
+  const questionById = new Map(questions.map((q) => [q.id, q.fields]));
+  const questionRefFor = (action: (typeof hsActions)[number]): string | null => {
+    const answerId = action.fields.SourceAnswer?.[0];
+    const answer = answerId ? answerById.get(answerId) : undefined;
+    const questionId = answer?.fields.TemplateQuestion?.[0];
+    const question = questionId ? questionById.get(questionId) : undefined;
+    if (!question) return null;
+    return question.QuestionNumber ? `Q${question.QuestionNumber}` : question.QuestionText ? question.QuestionText.slice(0, 40) : null;
+  };
 
   const openHsActions = hsActions.filter((a) => a.fields.Status === "Open" || a.fields.Status === "In progress");
   const rosterMismatches = openHsActions.filter((a) => (a.fields.RosterMismatch || []).length > 0);
@@ -69,6 +87,19 @@ export default async function HSReviewPage({
     .slice()
     .sort((a, b) => (a.fields.SiteName || "").localeCompare(b.fields.SiteName || ""));
 
+  // "make the results download to pdf so if salli ever needs to do this
+  // she can" (Lorraine, 1 Sep 2026) - PDF export of whatever's currently
+  // filtered, via DownloadLogPdfButton (client-side jsPDF, see that file).
+  const filterDescription = selectedSiteId || selectedMonth
+    ? `${selectedSiteId ? siteName(selectedSiteId) : "All sites"} - ${selectedMonth || "all time"}`
+    : "All sites - all time";
+  const pdfRows = filteredSubmissions.map((s) => ({
+    site: siteName(s.fields.Site?.[0]),
+    date: s.fields.SubmissionDate || "",
+    completedBy: s.fields.CompletedByName || "",
+    status: s.fields.Status || "",
+  }));
+
   return (
     <div>
       <h1 style={{ fontSize: 24, marginBottom: 4 }}>H&S Review</h1>
@@ -82,8 +113,14 @@ export default async function HSReviewPage({
         <KpiCard label="Roster/poster mismatches open" value={rosterMismatches.length} />
       </div>
 
-      <Card title={`Submissions log (${filteredSubmissions.length}${selectedSiteId || selectedMonth ? ` of ${hsSubmissions.length}` : ""})`}>
-        <form method="get" style={{ display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap", marginBottom: 16 }}>
+      <Card>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
+          <h3 style={{ marginTop: 0, marginBottom: 0, fontSize: 16 }}>
+            Submissions log ({filteredSubmissions.length}{selectedSiteId || selectedMonth ? ` of ${hsSubmissions.length}` : ""})
+          </h3>
+          <DownloadLogPdfButton rows={pdfRows} filterDescription={filterDescription} />
+        </div>
+        <form method="get" style={{ display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap", marginTop: 16, marginBottom: 16 }}>
           <div>
             <label style={{ display: "block", fontSize: 12, color: "#6E6E6E", marginBottom: 4 }}>Site</label>
             <select name="site" defaultValue={selectedSiteId} style={{ padding: "8px 10px", border: "1px solid #ccc", borderRadius: 6, fontSize: 14, minWidth: 180 }}>
@@ -140,6 +177,7 @@ export default async function HSReviewPage({
           <thead>
             <tr style={{ textAlign: "left", color: "#6E6E6E", borderBottom: "1px solid #eee" }}>
               <th style={{ padding: "6px 4px" }}>Site</th>
+              <th>Question</th>
               <th>Issue</th>
               <th>Priority</th>
               <th>Identified</th>
@@ -150,6 +188,7 @@ export default async function HSReviewPage({
             {openHsActions.map((a) => (
               <tr key={a.id} style={{ borderBottom: "1px solid #f2f2f2" }}>
                 <td style={{ padding: "8px 4px" }}>{siteName(a.fields.Site?.[0])}</td>
+                <td style={{ color: "#6E6E6E", whiteSpace: "nowrap" }}>{questionRefFor(a) || "-"}</td>
                 <td>{a.fields.IssueDescription}</td>
                 <td>{a.fields.Priority}</td>
                 <td>{a.fields.DateIdentified}</td>
@@ -157,7 +196,7 @@ export default async function HSReviewPage({
               </tr>
             ))}
             {openHsActions.length === 0 && (
-              <tr><td colSpan={5} style={{ padding: "16px 4px", color: "#999" }}>Nothing open.</td></tr>
+              <tr><td colSpan={6} style={{ padding: "16px 4px", color: "#999" }}>Nothing open.</td></tr>
             )}
           </tbody>
         </table>

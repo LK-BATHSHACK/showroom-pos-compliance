@@ -3,6 +3,7 @@ import { redirect, notFound } from "next/navigation";
 import { requireRole } from "@/lib/auth";
 import { listRecords, getRecord, TABLES } from "@/lib/airtable";
 import { Card } from "@/components/ui";
+import DownloadSubmissionPdfButton from "@/components/DownloadSubmissionPdfButton";
 
 export const dynamic = "force-dynamic";
 
@@ -58,10 +59,30 @@ export default async function HSSubmissionDetailPage({ params }: { params: { id:
 
   const siteName = sites.find((s) => s.id === submission.fields.Site?.[0])?.fields.SiteName || "-";
 
+  const pdfSections = Array.from(bySection.entries()).map(([section, items]) => ({
+    section,
+    items: items.map((a) => ({
+      qnum: a.question.QuestionNumber ?? null,
+      text: a.question.QuestionText,
+      answerText: a.text,
+      hasPhotos: a.photos.length > 0,
+    })),
+  }));
+
   return (
     <div>
       <Link href="/hs-review" style={{ color: "#3348B0", fontSize: 13 }}>&larr; Back to H&S Review</Link>
-      <h1 style={{ fontSize: 24, marginTop: 8, marginBottom: 4 }}>{siteName} - {submission.fields.SubmissionDate}</h1>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginTop: 8, marginBottom: 4, gap: 12, flexWrap: "wrap" }}>
+        <h1 style={{ fontSize: 24, margin: 0 }}>{siteName} - {submission.fields.SubmissionDate}</h1>
+        <DownloadSubmissionPdfButton
+          siteName={siteName}
+          submissionDate={submission.fields.SubmissionDate || ""}
+          completedByName={submission.fields.CompletedByName || ""}
+          completedByEmail={submission.fields.CompletedByEmail || ""}
+          status={submission.fields.Status || ""}
+          sections={pdfSections}
+        />
+      </div>
       <p style={{ color: "#6E6E6E", marginTop: 0, marginBottom: 24 }}>
         Completed by {submission.fields.CompletedByName} ({submission.fields.CompletedByEmail}) - {submission.fields.Status}
       </p>

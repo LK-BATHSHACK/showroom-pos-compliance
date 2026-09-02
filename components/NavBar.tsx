@@ -30,10 +30,15 @@ export default function NavBar({ session }: { session: SessionPayload | null }) 
   const links = LINKS.filter((l) => l.roles.includes(session.role));
 
   return (
-    <nav style={{ background: "#1D1C1D", padding: "0 24px", display: "flex", alignItems: "center", height: 56 }}>
+    <nav style={{ background: "#1D1C1D", padding: "0 16px", display: "flex", alignItems: "center", height: 56, overflowX: "auto" }}>
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src="/bathshack-logo-white.png" alt="Bathshack" style={{ height: 22, marginRight: 32, display: "block" }} />
-      <div style={{ display: "flex", gap: 24, flex: 1 }}>
+      <img src="/bathshack-logo-white.png" alt="Bathshack" style={{ height: 22, marginRight: 20, display: "block", flexShrink: 0 }} />
+      {/* Was a plain flex row with no wrap/scroll - on a narrow phone (7
+          links + logo + name + logout, all whiteSpace:nowrap) that forced
+          the whole page wider than the screen. overflowX:auto here keeps
+          the nav scrollable on its own without pushing the page itself into
+          horizontal scroll (2 Sep 2026 mobile pass). */}
+      <div style={{ display: "flex", gap: 20, flex: 1, overflowX: "auto" }}>
         {links.map((l) => (
           <Link
             key={l.href}
@@ -46,13 +51,14 @@ export default function NavBar({ session }: { session: SessionPayload | null }) 
               borderBottom: pathname?.startsWith(l.href) ? "2px solid #E6017E" : "2px solid transparent",
               paddingBottom: 4,
               whiteSpace: "nowrap",
+              flexShrink: 0,
             }}
           >
             {l.label}
           </Link>
         ))}
       </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, flexShrink: 0, paddingLeft: 12 }}>
         <div style={{ textAlign: "right" }}>
           <div style={{ color: "#fff", fontSize: 13, lineHeight: 1.2 }}>{session.name}</div>
           <div style={{ color: "#8A8A8A", fontSize: 11, lineHeight: 1.2 }}>

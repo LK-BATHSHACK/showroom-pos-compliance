@@ -264,6 +264,58 @@ function isBlankOrNA(text: string): boolean {
   return t === "" || t === "n/a" || t === "na" || t === "none";
 }
 
+// ---------------------------------------------------------------------------
+// Broader "some things aren't picking up issues" fix (Salli, via Lorraine,
+// 2 Sep 2026 - she gave Q16/Q24 as examples but the underlying gap is
+// general: several Single choice questions have an obvious "bad"/request
+// option that ISSUE_FIELD_QUESTION_NUMBERS and ROSTER_CHECKS never covered
+// because neither mechanism was built to look at a Single choice value on
+// its own). This is deliberately scoped to the options that clearly read as
+// "something needs following up" on inspection of the real question set
+// (Aug/Sept 2026), not every Single choice option - see the architecture
+// doc for the full list this was checked against.
+// ---------------------------------------------------------------------------
+
+const SINGLE_CHOICE_FLAG_VALUES: Record<number, string[]> = {
+  10: ["Report issue/Order Replacement"], // H&S poster (NI/GB variant) missing/wrong
+  19: ["Request a poster"], // safe lifting technique poster
+  21: ["Request a poster"], // large tile lifting poster
+  30: ["No, I need to update it (please send me a link to an editable version)"], // muster point not on evac procedure
+  36: [
+    "Mine is different - I will send a copy to Salli to upload",
+    "It's missing - I will send a copy to Salli to upload",
+  ], // fire evacuation procedure vs intranet
+  45: ["No - I will contact Salli Hunt to discuss"], // first aid kit not correct
+  60: ["No - I need some"], // wet floor signs
+};
+
+// Q23 ("Request more posters" - children-supervision signage) is handled
+// separately, not via the map above, because Salli specifically wants the
+// quantity from Q24 ("How many copies?") folded into the one action rather
+// than raised as two disconnected items.
+const POSTER_QUANTITY_QNUM = 23;
+const POSTER_QUANTITY_FOLLOWUP_QNUM = 24;
+const POSTER_QUANTITY_BAD_VALUE = "Request more posters";
+
+// Q16 ("bins/food waste/fridges cleaned out regularly") - "No" should be
+// flagged even with no accompanying Q17 text (Salli, 2 Sep 2026: "I said on
+// Q16 - NO but I didn't report any wording as an issue... I wonder if it
+// could pick up on that being a NO?"). If Q17 DOES have real text, that's
+// already covered by Q17 being in ISSUE_FIELD_QUESTION_NUMBERS - this only
+// fires to cover the gap where no free text was given.
+const WELFARE_BINS_QNUM = 16;
+const WELFARE_BINS_BAD_VALUE = "No";
+const WELFARE_BINS_FOLLOWUP_QNUM = 17;
+
+// Q49 ("kit used") / Q53 ("accidents/incidents/near misses") consistency
+// check (Salli, 2 Sep 2026: "I said no accidents but I said yes to kit
+// being used - I wonder if it could pick that up somehow?"). Different
+// sections (First Aid vs Accidents/Incidents), so this can't live in the
+// per-question loop the way ISSUE_FIELD_QUESTION_NUMBERS does - it needs
+// both answers looked up together, after all answers are known.
+const KIT_USED_QNUM = 49;
+const ACCIDENTS_QNUM = 53;
+
 export type AnswerInput = {
   questionId: string;
   value: string; // for Matrix, a JSON-stringified {subQuestion: answer} map; for Multiple choice, semicolon-joined selections
@@ -368,6 +420,15 @@ export async function submitHSWalkaround(input: SubmissionInput) {
   const immediateHits: { question: TemplateQuestion; answer: string }[] = [];
   const photoUploadErrors: string[] = [];
 
+  // Answers keyed by question number, for the cross-question checks below
+  // (Q16/Q17, Q23/Q24, Q49/Q53) that need to look at more than one answer
+  // at once rather than judging a single answer in isolation.
+  const answerByQnum = new Map<number, { value: string; recordId: string }>();
+  validAnswers.forEach((a, i) => {
+    const qn = questionById.get(a.questionId)?.qnum;
+    if (qn) answerByQnum.set(qn, { value: a.value, recordId: answerRecords[i].id });
+  });
+
   // Photo uploads (currently just Q62) - one uploadAttachment call per file,
   // which appends to the Answer's Photo field rather than replacing it. Runs
   // after all Answers are created so we have real record IDs to attach to.
@@ -406,7 +467,7 @@ export async function submitHSWalkaround(input: SubmissionInput) {
         Site: [site.id],
         SourceAnswer: [answerRecord.id],
         RosterMismatch: roster ? [roster.id] : undefined,
-        IssueDescription: check.note,
+        IssueDescription: `${check.note} (Q${q.qnum})`,
         Priority: "Medium",
         OwnerName: input.submittedByName,
         OwnerEmail: input.submittedByEmail,
@@ -421,13 +482,74 @@ export async function submitHSWalkaround(input: SubmissionInput) {
         Status: "Open",
         Site: [site.id],
         SourceAnswer: [answerRecord.id],
-        IssueDescription: a.value,
+        // Suffixed with the question number - people aren't always specific
+        // in what they type here (Salli, 2 Sep 2026: "there is an issue
+        // that just says no - I'm not sure which question that relates
+        // to"), so make it traceable without having to open the submission.
+        IssueDescription: `${a.value} (Q${q.qnum})`,
         Priority: "Medium",
         OwnerName: input.submittedByName,
         OwnerEmail: input.submittedByEmail,
         DateIdentified: today,
         UrgencyClass: q.urgency,
       });
+    }
+
+    // Broader "bad option picked but never flagged" fix - see
+    // SINGLE_CHOICE_FLAG_VALUES above.
+    if (q.qnum && SINGLE_CHOICE_FLAG_VALUES[q.qnum]?.includes(a.value)) {
+      actionsToCreate.push({
+        Name: `${site.name} - Q${q.qnum} reported issue`,
+        Status: "Open",
+        Site: [site.id],
+        SourceAnswer: [answerRecord.id],
+        IssueDescription: `${a.value} (Q${q.qnum})`,
+        Priority: "Medium",
+        OwnerName: input.submittedByName,
+        OwnerEmail: input.submittedByEmail,
+        DateIdentified: today,
+        UrgencyClass: q.urgency,
+      });
+    }
+
+    // Q23 "Request more posters" - fold in Q24's quantity rather than
+    // raising a second, disconnected item (Salli, 2 Sep 2026).
+    if (q.qnum === POSTER_QUANTITY_QNUM && a.value === POSTER_QUANTITY_BAD_VALUE) {
+      const qty = answerByQnum.get(POSTER_QUANTITY_FOLLOWUP_QNUM)?.value;
+      actionsToCreate.push({
+        Name: `${site.name} - Q${q.qnum} reported issue`,
+        Status: "Open",
+        Site: [site.id],
+        SourceAnswer: [answerRecord.id],
+        IssueDescription: `More children-supervision posters requested (Q${q.qnum})${qty ? ` - quantity: ${qty}` : ""}.`,
+        Priority: "Medium",
+        OwnerName: input.submittedByName,
+        OwnerEmail: input.submittedByEmail,
+        DateIdentified: today,
+        UrgencyClass: q.urgency,
+      });
+    }
+
+    // Q16 "No" with no Q17 free text - flag it anyway (Salli, 2 Sep 2026).
+    // If Q17 does have real text, ISSUE_FIELD_QUESTION_NUMBERS (which
+    // includes 17) already raises an action from that - skip here to avoid
+    // duplicating it.
+    if (q.qnum === WELFARE_BINS_QNUM && a.value === WELFARE_BINS_BAD_VALUE) {
+      const followUp = answerByQnum.get(WELFARE_BINS_FOLLOWUP_QNUM)?.value || "";
+      if (isBlankOrNA(followUp)) {
+        actionsToCreate.push({
+          Name: `${site.name} - Q${q.qnum} reported issue`,
+          Status: "Open",
+          Site: [site.id],
+          SourceAnswer: [answerRecord.id],
+          IssueDescription: `No regular process/schedule for bins/food waste/fridge cleaning reported (Q${q.qnum}) - no further detail given.`,
+          Priority: "Medium",
+          OwnerName: input.submittedByName,
+          OwnerEmail: input.submittedByEmail,
+          DateIdentified: today,
+          UrgencyClass: q.urgency,
+        });
+      }
     }
 
     // Q63/65: training request / risk assessment request - anything other than the "none needed" option.
@@ -437,7 +559,7 @@ export async function submitHSWalkaround(input: SubmissionInput) {
         Status: "Open",
         Site: [site.id],
         SourceAnswer: [answerRecord.id],
-        IssueDescription: `Training requested: ${a.value}`,
+        IssueDescription: `Training requested: ${a.value} (Q${q.qnum})`,
         Priority: "Low",
         OwnerName: input.submittedByName,
         OwnerEmail: input.submittedByEmail,
@@ -451,7 +573,7 @@ export async function submitHSWalkaround(input: SubmissionInput) {
         Status: "Open",
         Site: [site.id],
         SourceAnswer: [answerRecord.id],
-        IssueDescription: `Risk assessment requested: ${a.value}`,
+        IssueDescription: `Risk assessment requested: ${a.value} (Q${q.qnum})`,
         Priority: "Medium",
         OwnerName: input.submittedByName,
         OwnerEmail: input.submittedByEmail,
@@ -460,6 +582,28 @@ export async function submitHSWalkaround(input: SubmissionInput) {
       });
     }
   });
+
+  // Q49/Q53 consistency check (Salli, 2 Sep 2026): kit reported used but no
+  // accident/incident/near miss logged for the same visit is worth a nudge
+  // even though neither answer alone is "wrong" - it's the combination.
+  // Deliberately Low priority/Digest, not an immediate escalation - this is
+  // "worth double-checking", not itself an accident report.
+  const kitUsed = answerByQnum.get(KIT_USED_QNUM);
+  const accidentsReported = answerByQnum.get(ACCIDENTS_QNUM);
+  if (kitUsed?.value === "Yes" && accidentsReported && !accidentsReported.value.startsWith("Yes")) {
+    actionsToCreate.push({
+      Name: `${site.name} - Q${KIT_USED_QNUM}/Q${ACCIDENTS_QNUM} inconsistency`,
+      Status: "Open",
+      Site: [site.id],
+      SourceAnswer: [kitUsed.recordId],
+      IssueDescription: `First aid kit reported as used (Q${KIT_USED_QNUM}) but no accident/incident/near miss was logged (Q${ACCIDENTS_QNUM}: "${accidentsReported.value}") - worth checking this was recorded correctly.`,
+      Priority: "Low",
+      OwnerName: input.submittedByName,
+      OwnerEmail: input.submittedByEmail,
+      DateIdentified: today,
+      UrgencyClass: "Digest",
+    });
+  }
 
   const createdActions = actionsToCreate.length ? await createRecords<any>(TABLES.ACTIONS, actionsToCreate) : [];
 

@@ -58,3 +58,23 @@ html,
 body {
   font-family: var(--font-body);
 }
+
+/* Mobile-friendliness pass (2 Sep 2026, prompted by Salli's H&S Check
+   feedback via Lorraine) - most of the app's styling is inline per-component
+   and already responsive (percentage widths, flex-wrap), but two gaps were
+   estate-wide: no box-sizing reset (padding could push a 100%-width element
+   past its container on a narrow screen) and no cap on accidental horizontal
+   overflow (e.g. a long unbroken URL or table). */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  overflow-x: hidden;
+}
+
+img {
+  max-width: 100%;
+}
