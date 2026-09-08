@@ -31,22 +31,57 @@ export default function ActionsTabs({ rows, resolvedRows = [] }: { rows: Row[]; 
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
 
+  // Lifted into local state (rather than reading `rows`/`resolvedRows`
+  // props directly) so a resolve saved via the new Resolution area (8 Sep
+  // 2026) can move a row out of the open list immediately - previously the
+  // row's own "Resolved" text updated in place, but the row stayed sitting
+  // in the visible table until the page was reloaded, since the props are
+  // just a one-time server-rendered snapshot. That undermined the actual
+  // point of "then it could disappear" from Lorraine's original ask.
+  const [openRows, setOpenRows] = useState<Row[]>(rows);
+  const [resolvedList, setResolvedList] = useState<Row[]>(resolvedRows);
+
+  // Only H&S actually moves rows on resolve - POS deliberately stays visible
+  // as "awaiting next audit to verify" (see app/actions/page.tsx), so a POS
+  // resolve should keep showing in place, not disappear.
+  function handleResolved(actionId: string, notes: string) {
+    setOpenRows((prev) => {
+      const idx = prev.findIndex((r) => r.action.id === actionId);
+      if (idx === -1 || prev[idx].source !== "H&S") return prev;
+      const row = prev[idx];
+      const updatedRow: Row = {
+        ...row,
+        action: {
+          ...row.action,
+          fields: {
+            ...row.action.fields,
+            Status: "Resolved",
+            ResolutionNotes: notes,
+            DateCompleted: new Date().toISOString().slice(0, 10),
+          },
+        },
+      };
+      setResolvedList((list) => [updatedRow, ...list]);
+      return prev.filter((_, i) => i !== idx);
+    });
+  }
+
   const counts = useMemo(
     () => ({
-      All: rows.length,
-      POS: rows.filter((r) => r.source === "POS").length,
-      "H&S": rows.filter((r) => r.source === "H&S").length,
+      All: openRows.length,
+      POS: openRows.filter((r) => r.source === "POS").length,
+      "H&S": openRows.filter((r) => r.source === "H&S").length,
     }),
-    [rows]
+    [openRows]
   );
 
   const sites = useMemo(
-    () => Array.from(new Set([...rows, ...resolvedRows].map((r) => r.locationName))).sort(),
-    [rows, resolvedRows]
+    () => Array.from(new Set([...openRows, ...resolvedList].map((r) => r.locationName))).sort(),
+    [openRows, resolvedList]
   );
 
   const visible = useMemo(() => {
-    const base = showResolved ? [...rows, ...resolvedRows] : rows;
+    const base = showResolved ? [...openRows, ...resolvedList] : openRows;
     const byTab = tab === "All" ? base : base.filter((r) => r.source === tab);
     return byTab.filter((r) => {
       if (site && r.locationName !== site) return false;
@@ -55,7 +90,7 @@ export default function ActionsTabs({ rows, resolvedRows = [] }: { rows: Row[]; 
       if (dateTo && identified > dateTo) return false;
       return true;
     });
-  }, [rows, resolvedRows, showResolved, tab, site, dateFrom, dateTo]);
+  }, [openRows, resolvedList, showResolved, tab, site, dateFrom, dateTo]);
 
   const inputStyle: React.CSSProperties = {
     padding: "6px 8px",
@@ -105,10 +140,10 @@ export default function ActionsTabs({ rows, resolvedRows = [] }: { rows: Row[]; 
             Clear filters
           </button>
         )}
-        {resolvedRows.length > 0 && (
+        {resolvedList.length > 0 && (
           <label style={{ fontSize: 13, color: "#6E6E6E", display: "flex", gap: 6, alignItems: "center", marginLeft: "auto" }}>
             <input type="checkbox" checked={showResolved} onChange={(e) => setShowResolved(e.target.checked)} />
-            Show resolved ({resolvedRows.length})
+            Show resolved ({resolvedList.length})
           </label>
         )}
       </div>
@@ -136,6 +171,7 @@ export default function ActionsTabs({ rows, resolvedRows = [] }: { rows: Row[]; 
                 showroomId={r.showroomId}
                 showroomName={r.locationName}
                 source={r.source}
+                onResolved={(notes) => handleResolved(r.action.id, notes)}
                 foundVia={
                   r.source === "POS" ? (
                     r.auditType ? <AuditTypeBadge auditType={r.auditType} /> : undefined
