@@ -8,6 +8,7 @@
 
 import { listRecords, createRecords, uploadAttachment, TABLES, type AttachmentUpload } from "./airtable";
 import { sendEmail, emailShell, BRAND } from "./resend";
+import { formatFlaggedIssue, formatFreeTextIssue, formatRosterIssue } from "./hsActionLabels";
 
 export type AnswerType =
   | "Short answer"
@@ -69,6 +70,12 @@ const HS_REFERENCE_IMAGES: Record<number, ReferenceImage[]> = {
   29: [{ url: "/hs-reference/q29-assembly-point-sign.png" }],
   30: [{ url: "/hs-reference/q30-evacuation-procedure-example.png", caption: "Example only - yours will show your own site/Fire Warden" }],
   31: [{ url: "/hs-reference/q31-fire-marshals-poster-template.png" }],
+  // Fire Action Notice, added 8 Sep 2026 per Lorraine's request ("In Q35 is
+  // it possible to add a Fire Action Notice image so they know what they
+  // are looking for?") - the first Matrix sub-item on Q35 (Fire Warden
+  // Duties) asks whether these are displayed at manual call points/exit
+  // doors, so the image shows the Fire Warden what to look for on the wall.
+  35: [{ url: "/hs-reference/q35-fire-action-notice.png" }],
   41: [{ url: "/hs-reference/q41-first-aid-responders-poster-template.png" }],
   44: [{ url: "/hs-reference/q44-first-aid-kit-size-chart.png" }],
   46: [{ url: "/hs-reference/q46-first-aid-kit-contents-chart.png" }],
@@ -467,7 +474,7 @@ export async function submitHSWalkaround(input: SubmissionInput) {
         Site: [site.id],
         SourceAnswer: [answerRecord.id],
         RosterMismatch: roster ? [roster.id] : undefined,
-        IssueDescription: `${check.note} (Q${q.qnum})`,
+        IssueDescription: formatRosterIssue(q.qnum, check.note),
         Priority: "Medium",
         OwnerName: input.submittedByName,
         OwnerEmail: input.submittedByEmail,
@@ -482,11 +489,12 @@ export async function submitHSWalkaround(input: SubmissionInput) {
         Status: "Open",
         Site: [site.id],
         SourceAnswer: [answerRecord.id],
-        // Suffixed with the question number - people aren't always specific
-        // in what they type here (Salli, 2 Sep 2026: "there is an issue
-        // that just says no - I'm not sure which question that relates
-        // to"), so make it traceable without having to open the submission.
-        IssueDescription: `${a.value} (Q${q.qnum})`,
+        // Prefixed with the question number + section - people aren't
+        // always specific in what they type here (Salli, 2 Sep 2026: "there
+        // is an issue that just says no - I'm not sure which question that
+        // relates to"), so make it traceable without having to open the
+        // submission (Lorraine, 8 Sep 2026: same "tells Zara nothing" gap).
+        IssueDescription: formatFreeTextIssue(q.qnum, a.value),
         Priority: "Medium",
         OwnerName: input.submittedByName,
         OwnerEmail: input.submittedByEmail,
@@ -503,7 +511,7 @@ export async function submitHSWalkaround(input: SubmissionInput) {
         Status: "Open",
         Site: [site.id],
         SourceAnswer: [answerRecord.id],
-        IssueDescription: `${a.value} (Q${q.qnum})`,
+        IssueDescription: formatFlaggedIssue(q.qnum, a.value),
         Priority: "Medium",
         OwnerName: input.submittedByName,
         OwnerEmail: input.submittedByEmail,
@@ -521,7 +529,7 @@ export async function submitHSWalkaround(input: SubmissionInput) {
         Status: "Open",
         Site: [site.id],
         SourceAnswer: [answerRecord.id],
-        IssueDescription: `More children-supervision posters requested (Q${q.qnum})${qty ? ` - quantity: ${qty}` : ""}.`,
+        IssueDescription: `${formatFlaggedIssue(q.qnum, a.value)}${qty ? ` - quantity: ${qty}` : ""}.`,
         Priority: "Medium",
         OwnerName: input.submittedByName,
         OwnerEmail: input.submittedByEmail,
@@ -542,7 +550,7 @@ export async function submitHSWalkaround(input: SubmissionInput) {
           Status: "Open",
           Site: [site.id],
           SourceAnswer: [answerRecord.id],
-          IssueDescription: `No regular process/schedule for bins/food waste/fridge cleaning reported (Q${q.qnum}) - no further detail given.`,
+          IssueDescription: `${formatFlaggedIssue(q.qnum, a.value)} - no further detail given.`,
           Priority: "Medium",
           OwnerName: input.submittedByName,
           OwnerEmail: input.submittedByEmail,
@@ -559,7 +567,7 @@ export async function submitHSWalkaround(input: SubmissionInput) {
         Status: "Open",
         Site: [site.id],
         SourceAnswer: [answerRecord.id],
-        IssueDescription: `Training requested: ${a.value} (Q${q.qnum})`,
+        IssueDescription: `(Q${q.qnum}) Training requested: ${a.value}`,
         Priority: "Low",
         OwnerName: input.submittedByName,
         OwnerEmail: input.submittedByEmail,
@@ -573,7 +581,7 @@ export async function submitHSWalkaround(input: SubmissionInput) {
         Status: "Open",
         Site: [site.id],
         SourceAnswer: [answerRecord.id],
-        IssueDescription: `Risk assessment requested: ${a.value} (Q${q.qnum})`,
+        IssueDescription: `(Q${q.qnum}) Risk assessment requested: ${a.value}`,
         Priority: "Medium",
         OwnerName: input.submittedByName,
         OwnerEmail: input.submittedByEmail,

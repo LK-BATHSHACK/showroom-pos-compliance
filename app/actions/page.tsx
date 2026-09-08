@@ -31,23 +31,6 @@ export default async function ActionsPage() {
     if (auditId) auditTypeByLineItemId[li.id] = auditTypeById[auditId] || "";
   });
 
-  // Shows everything not yet fully closed out, including "Resolved" items -
-  // those are visible here as "awaiting next audit to verify" rather than
-  // disappearing the moment the designer marks a fix done, since the fix
-  // isn't confirmed until an independent audit reports that item back as
-  // Present-OK (see the auto-verification step in processAuditSubmission.ts).
-  //
-  // Also requires a linked location - a handful of fully-blank Action
-  // records pre-date any real use of the app (same junk-row pattern found
-  // in POS Requests). POS actions carry a Showroom link, H&S actions carry
-  // a Site link (Actions.Site "generalises Showroom" - see the schema) -
-  // checking both means this doesn't silently exclude every H&S action the
-  // way a Showroom-only check used to (found 31 Aug 2026 while building the
-  // POS/H&S split - H&S actions were invisible here entirely until now).
-  const open = actionRecords.filter(
-    (a) => a.fields.Status !== "Verified-Closed" && ((a.fields.Showroom || []).length > 0 || (a.fields.Site || []).length > 0)
-  );
-
   // Classification: every Action created by the POS pipeline (old migrated
   // data, any Excel upload, or the new in-tool POS Walkaround form) sets
   // SourceAuditLineItem; every H&S action sets SourceAnswer instead. Neither
@@ -62,22 +45,46 @@ export default async function ActionsPage() {
     return "Other";
   }
 
+  // Requires a linked location - a handful of fully-blank Action records
+  // pre-date any real use of the app (same junk-row pattern found in POS
+  // Requests). POS actions carry a Showroom link, H&S actions carry a Site
+  // link (Actions.Site "generalises Showroom" - see the schema) - checking
+  // both means this doesn't silently exclude every H&S action the way a
+  // Showroom-only check used to (found 31 Aug 2026 while building the
+  // POS/H&S split - H&S actions were invisible here entirely until now).
+  const hasLocation = (a: any) => (a.fields.Showroom || []).length > 0 || (a.fields.Site || []).length > 0;
+
+  // POS keeps the stricter rule: "Resolved" is visible as "awaiting next
+  // audit to verify" rather than disappearing the moment someone marks a
+  // fix done, since the fix isn't confirmed until an independent audit
+  // reports that item back as Present-OK (see processAuditSubmission.ts).
+  // H&S has no equivalent independent re-check - it's a self-reported
+  // monthly walkaround, not a physical spot-check - so a self-marked
+  // Resolved (with the notes box) is treated as done immediately and drops
+  // out of the default view (Lorraine, 8 Sep 2026: "a tick box to say
+  // Resolved... and then it could disappear, or move to a hidden 'resolved'
+  // pot" - confirmed she wants immediate-disappear for H&S rather than
+  // matching POS's stricter next-audit rule). Still recoverable via the
+  // "Show resolved" toggle in ActionsTabs, not deleted.
+  const open = actionRecords.filter((a) => {
+    if (!hasLocation(a)) return false;
+    if (a.fields.Status === "Verified-Closed") return false;
+    if (classify(a) === "H&S" && a.fields.Status === "Resolved") return false;
+    return true;
+  });
+  const resolvedHS = actionRecords.filter((a) => hasLocation(a) && classify(a) === "H&S" && a.fields.Status === "Resolved");
+
   function hsFoundViaKind(a: any): "roster" | "issue" | "training" | "risk" {
     if ((a.fields.RosterMismatch || []).length > 0) return "roster";
     const issue: string = a.fields.IssueDescription || "";
-    if (issue.startsWith("Training requested:")) return "training";
-    if (issue.startsWith("Risk assessment requested:")) return "risk";
+    // .includes() not .startsWith() - these now lead with "(Qn) " (Lorraine,
+    // 8 Sep 2026 readable-labels request), so the phrase itself moved right.
+    if (issue.includes("Training requested:")) return "training";
+    if (issue.includes("Risk assessment requested:")) return "risk";
     return "issue";
   }
 
-  const sorted = open.sort((a, b) => {
-    const pa = PRIORITY_ORDER.indexOf(a.fields.Priority);
-    const pb = PRIORITY_ORDER.indexOf(b.fields.Priority);
-    if (pa !== pb) return pa - pb;
-    return (a.fields.TargetCompletionDate || "").localeCompare(b.fields.TargetCompletionDate || "");
-  });
-
-  const rows = sorted.map((a) => {
+  function toRow(a: any) {
     const source = classify(a);
     const showroomId = a.fields.Showroom?.[0];
     const siteId = a.fields.Site?.[0];
@@ -92,13 +99,27 @@ export default async function ActionsPage() {
       auditType,
       hsKind: source === "H&S" ? hsFoundViaKind(a) : undefined,
     };
+  }
+
+  const sorted = open.sort((a, b) => {
+    const pa = PRIORITY_ORDER.indexOf(a.fields.Priority);
+    const pb = PRIORITY_ORDER.indexOf(b.fields.Priority);
+    if (pa !== pb) return pa - pb;
+    return (a.fields.TargetCompletionDate || "").localeCompare(b.fields.TargetCompletionDate || "");
   });
+
+  const rows = sorted.map(toRow);
+  // H&S items self-marked Resolved - held separately so they can still be
+  // found via the "Show resolved" toggle rather than vanishing outright.
+  const resolvedRows = resolvedHS
+    .sort((a, b) => (b.fields.DateCompleted || "").localeCompare(a.fields.DateCompleted || ""))
+    .map(toRow);
 
   return (
     <div>
       <h1 style={{ fontSize: 24, marginBottom: 4 }}>Actions Tracker</h1>
       <p style={{ color: "#6E6E6E", marginTop: 0, marginBottom: 24 }}>{open.length} open actions across the estate</p>
-      <ActionsTabs rows={rows} />
+      <ActionsTabs rows={rows} resolvedRows={resolvedRows} />
     </div>
   );
 }

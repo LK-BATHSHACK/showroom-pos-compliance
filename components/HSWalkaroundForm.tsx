@@ -47,6 +47,18 @@ const MAX_FILES_PER_QUESTION = 10;
 const CONDITIONAL_QUESTIONS: Record<number, { dependsOnQnum: number; showWhen: (answer: string) => boolean }> = {
   7: { dependsOnQnum: 6, showWhen: (a) => a === "Yes" },
   17: { dependsOnQnum: 16, showWhen: (a) => a === "No" },
+  // Q24 "How many copies?" only makes sense if Q23 asked for more posters -
+  // was unconditionally required before, forcing a 1-4 answer even when Q23
+  // said "I already have enough" (Lorraine, 8 Sep 2026: "Q24 looks to be
+  // required, but I have confirmed I have enough signage and there isn't an
+  // option for ZERO posters needed"). Same fix shape as Q6/Q7 and Q16/Q17.
+  24: { dependsOnQnum: 23, showWhen: (a) => a === "Request more posters" },
+  // Q43 "Who is it?" only makes sense if Q42 says there IS a fully trained
+  // first aider on site (as opposed to just an appointed person, already
+  // named in Q41) - otherwise it duplicates Q41 (Lorraine, 8 Sep 2026: "Q41
+  // and 43 seem to ask the same question. Q43 shouldn't appear if 42 is
+  // answered NO").
+  43: { dependsOnQnum: 42, showWhen: (a) => a === "Yes" },
 };
 
 // Matrix questions (Fire Warden Duties, Warehouse material handling) each

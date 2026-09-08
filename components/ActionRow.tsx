@@ -82,7 +82,9 @@ export default function ActionRow({
             </button>
           )}
           {status === "Resolved" && (
-            <span style={{ fontSize: 12, color: "#999" }}>Awaiting next audit to verify</span>
+            <span style={{ fontSize: 12, color: "#999" }}>
+              {source === "H&S" ? "Resolved" : "Awaiting next audit to verify"}
+            </span>
           )}
         </div>
       </td>

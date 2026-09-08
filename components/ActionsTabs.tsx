@@ -18,8 +18,18 @@ type Tab = "All" | "POS" | "H&S";
 // Split requested 31 Aug 2026 (Lorraine: "different people manage those and
 // the actions of them") - one page, filter tabs, rather than two separate
 // pages, so nobody has to remember which URL covers which checklist.
-export default function ActionsTabs({ rows }: { rows: Row[] }) {
+//
+// Site + date filters and the "Show resolved" toggle added 8 Sep 2026
+// (Lorraine: "could there be an option to filter by site/date? I can
+// imagine that will get quite bunged up otherwise" + the H&S
+// disappear-on-Resolved change - resolvedRows is where those went, kept one
+// click away rather than gone for good).
+export default function ActionsTabs({ rows, resolvedRows = [] }: { rows: Row[]; resolvedRows?: Row[] }) {
   const [tab, setTab] = useState<Tab>("All");
+  const [showResolved, setShowResolved] = useState(false);
+  const [site, setSite] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
 
   const counts = useMemo(
     () => ({
@@ -30,16 +40,77 @@ export default function ActionsTabs({ rows }: { rows: Row[] }) {
     [rows]
   );
 
-  const visible = tab === "All" ? rows : rows.filter((r) => r.source === tab);
+  const sites = useMemo(
+    () => Array.from(new Set([...rows, ...resolvedRows].map((r) => r.locationName))).sort(),
+    [rows, resolvedRows]
+  );
+
+  const visible = useMemo(() => {
+    const base = showResolved ? [...rows, ...resolvedRows] : rows;
+    const byTab = tab === "All" ? base : base.filter((r) => r.source === tab);
+    return byTab.filter((r) => {
+      if (site && r.locationName !== site) return false;
+      const identified: string = r.action.fields.DateIdentified || "";
+      if (dateFrom && identified < dateFrom) return false;
+      if (dateTo && identified > dateTo) return false;
+      return true;
+    });
+  }, [rows, resolvedRows, showResolved, tab, site, dateFrom, dateTo]);
+
+  const inputStyle: React.CSSProperties = {
+    padding: "6px 8px",
+    fontSize: 13,
+    border: "1px solid #ddd",
+    borderRadius: 6,
+    fontFamily: "inherit",
+  };
 
   return (
     <div>
-      <div style={{ display: "flex", gap: 4, marginBottom: 20, borderBottom: "1px solid #eee" }}>
+      <div style={{ display: "flex", gap: 4, marginBottom: 16, borderBottom: "1px solid #eee" }}>
         {(["All", "POS", "H&S"] as Tab[]).map((t) => (
           <TabButton key={t} active={tab === t} onClick={() => setTab(t)}>
             {t} ({counts[t]})
           </TabButton>
         ))}
+      </div>
+
+      <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginBottom: 16 }}>
+        <select value={site} onChange={(e) => setSite(e.target.value)} style={inputStyle}>
+          <option value="">All sites</option>
+          {sites.map((s) => (
+            <option key={s} value={s}>
+              {s}
+            </option>
+          ))}
+        </select>
+        <label style={{ fontSize: 13, color: "#6E6E6E", display: "flex", gap: 6, alignItems: "center" }}>
+          From
+          <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} style={inputStyle} />
+        </label>
+        <label style={{ fontSize: 13, color: "#6E6E6E", display: "flex", gap: 6, alignItems: "center" }}>
+          To
+          <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} style={inputStyle} />
+        </label>
+        {(site || dateFrom || dateTo) && (
+          <button
+            type="button"
+            onClick={() => {
+              setSite("");
+              setDateFrom("");
+              setDateTo("");
+            }}
+            style={{ background: "none", border: "none", color: "#E6017E", fontSize: 13, cursor: "pointer", padding: 0 }}
+          >
+            Clear filters
+          </button>
+        )}
+        {resolvedRows.length > 0 && (
+          <label style={{ fontSize: 13, color: "#6E6E6E", display: "flex", gap: 6, alignItems: "center", marginLeft: "auto" }}>
+            <input type="checkbox" checked={showResolved} onChange={(e) => setShowResolved(e.target.checked)} />
+            Show resolved ({resolvedRows.length})
+          </label>
+        )}
       </div>
 
       <Card>
@@ -77,7 +148,7 @@ export default function ActionsTabs({ rows }: { rows: Row[] }) {
             {visible.length === 0 && (
               <tr>
                 <td colSpan={9} style={{ padding: "16px 6px", color: "#999" }}>
-                  Nothing open here.
+                  Nothing here.
                 </td>
               </tr>
             )}

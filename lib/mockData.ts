@@ -400,6 +400,8 @@ const hsQuestionSeed: QSeed[] = [
   { qnum: 35, section: "Fire Warden Checklist", order: 35, text: "Fire Warden Duties - please work with your fire warden to ensure all the below have been checked. Any items ticked 'No' must be referenced/reported in the next question.", answerType: "Matrix", options: "Fire Action Notices are displayed at Manual Call points and first exit doors; All fire safety equipment, fire hoses and fire extinguishers are in position, undamaged, and classified (all tamper tags intact); Fire doors in good condition (satisfying all strips, closers, push pads and push bars); A fire evacuation plan (to assembly point) is on the wall and visible", required: true },
   { qnum: 40, section: "Fire Warden Checklist", order: 40, text: "Report any issues here", answerType: "Long answer", options: "n/a if no issues" },
   { qnum: 41, section: "First Aid", order: 41, text: "Who is the first aid appointed person on site? (check their certificate is in date via the training section on Breathe; ensure their name is on the poster)", answerType: "Short answer", required: true },
+  { qnum: 42, section: "First Aid", order: 42, text: "Do you have a fully trained first aider on site? (check if their certificate is in date via the training section on Breathe)", answerType: "Single choice", options: "Yes; No - just an appointed person", required: true },
+  { qnum: 43, section: "First Aid", order: 43, text: "Who is it?", answerType: "Short answer", required: true },
   { qnum: 49, section: "First Aid", order: 49, text: "Have any items of kit been used? (this should be recorded as an accident since last month)", answerType: "Yes/No", required: true },
   { qnum: 50, section: "First Aid", order: 50, text: "Report any issues here", answerType: "Long answer", options: "n/a if no issues" },
   { qnum: 51, section: "Mental Health First Aid", order: 51, text: "This poster is displayed on site (check the toilet doors, it may be there). Current MHFAs are Chris, Salli and Julia Kerr - please update the poster accordingly.", answerType: "Single choice", options: "I've had a new poster sent to me with the correct names on (Salli, Chris and Julia); I will print off a new version now (find it in the transport chat group on Teams); Missing poster - no printer on site, please send me one", required: true, rosterRole: "Mental Health First Aider" },
@@ -514,13 +516,57 @@ const users: Rec[] = [
 const submissions: Rec[] = [];
 const answers: Rec[] = [];
 
+// H&S-sourced Actions (SourceAnswer set, no Showroom link - Site instead),
+// for exercising the Actions Tracker's H&S-specific behaviour in preview:
+// the readable-label formatting (see lib/hsActionLabels.ts), and the
+// "Resolved disappears immediately, recoverable via Show resolved" rule
+// added 8 Sep 2026. SourceAnswer/RosterMismatch point at made-up IDs purely
+// so classify()/hsFoundViaKind() see a non-empty array - nothing looks the
+// actual Answer record up here.
+const hsActions: Rec[] = [
+  {
+    id: nextId("act"),
+    createdTime: "2026-09-05T09:00:00.000Z",
+    fields: {
+      Site: [siteByName("Antrim Showroom").id],
+      SourceAnswer: ["recPreviewFakeAnswer1"],
+      IssueDescription: "(Q19) Request a Safe Lifting / Manual Handling poster",
+      Priority: "Medium",
+      OwnerName: "Preview Store Manager",
+      OwnerEmail: "preview.storemanager@bathshack.com",
+      DateIdentified: "2026-09-05",
+      TargetCompletionDate: "2026-09-26",
+      Status: "Open",
+      UrgencyClass: "Digest",
+    },
+  },
+  {
+    id: nextId("act"),
+    createdTime: "2026-08-08T09:00:00.000Z",
+    fields: {
+      Site: [siteByName("Dublin Showroom").id],
+      SourceAnswer: ["recPreviewFakeAnswer2"],
+      IssueDescription: "(Q60) Wet floor signage needed",
+      Priority: "Medium",
+      OwnerName: "Preview Store Manager",
+      OwnerEmail: "preview.storemanager@bathshack.com",
+      DateIdentified: "2026-08-08",
+      TargetCompletionDate: "2026-08-29",
+      DateCompleted: "2026-08-20",
+      Status: "Resolved",
+      ResolutionNotes: "New signage ordered and put out same week.",
+      UrgencyClass: "Digest",
+    },
+  },
+];
+
 const store: Record<string, Rec[]> = {
   [TABLES.SETTINGS]: settings,
   [TABLES.SHOWROOMS]: showrooms,
   [TABLES.POS_CATALOGUE]: posCatalogue,
   [TABLES.AUDITS]: audits,
   [TABLES.AUDIT_LINE_ITEMS]: auditLineItems,
-  [TABLES.ACTIONS]: actions,
+  [TABLES.ACTIONS]: [...actions, ...hsActions],
   [TABLES.POS_REQUESTS]: posRequests,
   [TABLES.USERS]: users,
   [TABLES.SITES]: sites,
