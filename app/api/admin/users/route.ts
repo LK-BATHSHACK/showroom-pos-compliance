@@ -88,11 +88,26 @@ export async function PATCH(req: NextRequest) {
 
   const { id, role, siteId, active, resetPassword } = await req.json();
   if (!id) return NextResponse.json({ error: "Missing id." }, { status: 400 });
+  if (role && !["Admin", "Marketing", "H&S", "Store Manager"].includes(role)) {
+    return NextResponse.json({ error: "Invalid role." }, { status: 400 });
+  }
+  // Same rule as creating a new account - a Store Manager without a Site
+  // can't be locked to anything, which breaks the whole point of the role.
+  if (role === "Store Manager" && !siteId) {
+    return NextResponse.json({ error: "Store Manager accounts need a Site." }, { status: 400 });
+  }
 
   // Stop an Admin disabling their own only-active account and locking
   // themselves out with no other Admin left to re-enable it.
   if (active === false && id === session.uid) {
     return NextResponse.json({ error: "You can't disable your own account." }, { status: 400 });
+  }
+  // Same reasoning, added 9 Sep 2026 alongside the new Edit control in
+  // Users & Access - this PATCH already accepted `role`, but nothing was
+  // stopping an Admin editing their own account away from Admin and
+  // locking themselves (and everyone else) out of Users & Access.
+  if (role && role !== "Admin" && id === session.uid) {
+    return NextResponse.json({ error: "You can't remove your own Admin access." }, { status: 400 });
   }
 
   const fields: Record<string, any> = {};

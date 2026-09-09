@@ -24,8 +24,20 @@ type Tab = "All" | "POS" | "H&S";
 // imagine that will get quite bunged up otherwise" + the H&S
 // disappear-on-Resolved change - resolvedRows is where those went, kept one
 // click away rather than gone for good).
-export default function ActionsTabs({ rows, resolvedRows = [] }: { rows: Row[]; resolvedRows?: Row[] }) {
-  const [tab, setTab] = useState<Tab>("All");
+export default function ActionsTabs({
+  rows,
+  resolvedRows = [],
+  defaultTab = "All",
+}: {
+  rows: Row[];
+  resolvedRows?: Row[];
+  // H&S accounts land straight on the H&S tab (9 Sep 2026, Lorraine: "all
+  // the H&S logins need to be able to... manage the h&s side") - they don't
+  // manage POS, so starting them there instead of "All" skips a click and
+  // avoids POS rows they have no reason to look at.
+  defaultTab?: Tab;
+}) {
+  const [tab, setTab] = useState<Tab>(defaultTab);
   const [showResolved, setShowResolved] = useState(false);
   const [site, setSite] = useState("");
   const [dateFrom, setDateFrom] = useState("");

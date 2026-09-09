@@ -1,3 +1,4 @@
+import { getSession } from "@/lib/auth";
 import { listRecords, TABLES } from "@/lib/airtable";
 import ActionsTabs from "@/components/ActionsTabs";
 
@@ -6,6 +7,12 @@ export const dynamic = "force-dynamic";
 const PRIORITY_ORDER = ["Critical", "High", "Medium", "Low"];
 
 export default async function ActionsPage() {
+  // Role enforcement for this whole route lives in app/actions/layout.tsx
+  // (guardRole(["Admin", "Marketing", "H&S"])) - by the time this page
+  // renders, access is already confirmed. This just reads the session to
+  // pick which tab (All vs H&S) an H&S login should land on by default.
+  const session = await getSession();
+
   const [actionRecords, showroomRecords, siteRecords, lineItemRecords, auditRecords] = await Promise.all([
     listRecords<any>(TABLES.ACTIONS),
     listRecords<{ ShowroomName: string }>(TABLES.SHOWROOMS),
@@ -119,7 +126,7 @@ export default async function ActionsPage() {
     <div>
       <h1 style={{ fontSize: 24, marginBottom: 4 }}>Actions Tracker</h1>
       <p style={{ color: "#6E6E6E", marginTop: 0, marginBottom: 24 }}>{open.length} open actions across the estate</p>
-      <ActionsTabs rows={rows} resolvedRows={resolvedRows} />
+      <ActionsTabs rows={rows} resolvedRows={resolvedRows} defaultTab={session?.role === "H&S" ? "H&S" : "All"} />
     </div>
   );
 }

@@ -7,7 +7,12 @@ type NavLink = { href: string; label: string; roles: UserRole[] };
 
 const LINKS: NavLink[] = [
   { href: "/dashboard", label: "Overview", roles: ["Admin", "Marketing"] },
-  { href: "/actions", label: "Actions", roles: ["Admin", "Marketing"] },
+  // H&S added 9 Sep 2026 (Lorraine: "all the H&S logins need to be able to
+  // see the mark resolved and manage the h&s side") - the PATCH API
+  // already permitted H&S to resolve actions (lib/auth via
+  // app/api/action/[id]/route.ts), the nav link (and the page guard below)
+  // just hadn't caught up to let them reach it.
+  { href: "/actions", label: "Actions", roles: ["Admin", "Marketing", "H&S"] },
   { href: "/pos-check", label: "POS Check", roles: ["Admin", "Marketing", "Store Manager"] },
   { href: "/requests", label: "POS Requests", roles: ["Admin", "Marketing"] },
   { href: "/hs-check", label: "H&S Check", roles: ["Admin", "Marketing", "H&S", "Store Manager"] },

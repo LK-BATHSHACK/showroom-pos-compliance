@@ -29,6 +29,15 @@ export default function UsersAdmin() {
   const [error, setError] = useState("");
   const [rowError, setRowError] = useState("");
 
+  // Edit Role/Site for an existing account (9 Sep 2026, Lorraine: "admin
+  // needs access to update account access") - the PATCH API already
+  // accepted role/siteId (built alongside Disable/Reset/Delete, apparently
+  // never wired up to a control), so this is a UI-only addition.
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editRole, setEditRole] = useState("Store Manager");
+  const [editSiteId, setEditSiteId] = useState("");
+  const [saving, setSaving] = useState(false);
+
   async function load() {
     setLoading(true);
     const res = await fetch("/api/admin/users");
@@ -99,6 +108,39 @@ export default function UsersAdmin() {
       setRowError(body.error || "Something went wrong.");
       return;
     }
+    load();
+  }
+
+  function startEdit(u: UserRow) {
+    setRowError("");
+    setEditingId(u.id);
+    setEditRole(u.role);
+    setEditSiteId(u.siteId || "");
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+  }
+
+  async function saveEdit(u: UserRow) {
+    if (editRole === "Store Manager" && !editSiteId) {
+      setRowError("Pick a Site for a Store Manager account.");
+      return;
+    }
+    setRowError("");
+    setSaving(true);
+    const res = await fetch("/api/admin/users", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: u.id, role: editRole, siteId: editRole === "Store Manager" ? editSiteId : "" }),
+    });
+    setSaving(false);
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      setRowError(body.error || "Something went wrong.");
+      return;
+    }
+    setEditingId(null);
     load();
   }
 
@@ -177,23 +219,69 @@ export default function UsersAdmin() {
               </tr>
             </thead>
             <tbody>
-              {users.map((u) => (
-                <tr key={u.id} style={{ borderBottom: "1px solid #f2f2f2" }}>
-                  <td style={{ padding: "8px 4px" }}>{u.name}</td>
-                  <td>{u.email}</td>
-                  <td>{u.role}</td>
-                  <td>{u.siteName || "-"}</td>
-                  <td>
-                    {u.active ? <span style={{ color: "#0ca30c" }}>Active</span> : <span style={{ color: "#999" }}>Disabled</span>}
-                    {u.mustChangePassword && <span style={{ color: "#e8622c", marginLeft: 8, fontSize: 12 }}>Pending first login</span>}
-                  </td>
-                  <td style={{ whiteSpace: "nowrap" }}>
-                    <button onClick={() => toggleActive(u)} style={linkButtonStyle}>{u.active ? "Disable" : "Enable"}</button>
-                    <button onClick={() => resetPassword(u)} style={linkButtonStyle}>Reset password</button>
-                    <button onClick={() => deleteUser(u)} style={{ ...linkButtonStyle, color: "#d03b3b" }}>Delete</button>
-                  </td>
-                </tr>
-              ))}
+              {users.map((u) => {
+                const isEditing = editingId === u.id;
+                return (
+                  <tr key={u.id} style={{ borderBottom: "1px solid #f2f2f2" }}>
+                    <td style={{ padding: "8px 4px" }}>{u.name}</td>
+                    <td>{u.email}</td>
+                    <td>
+                      {isEditing ? (
+                        <select
+                          value={editRole}
+                          onChange={(e) => setEditRole(e.target.value)}
+                          style={{ ...inputStyle, padding: "4px 6px", fontSize: 13 }}
+                        >
+                          {ROLES.map((r) => (
+                            <option key={r} value={r}>{r}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        u.role
+                      )}
+                    </td>
+                    <td>
+                      {isEditing ? (
+                        editRole === "Store Manager" ? (
+                          <select
+                            value={editSiteId}
+                            onChange={(e) => setEditSiteId(e.target.value)}
+                            style={{ ...inputStyle, padding: "4px 6px", fontSize: 13 }}
+                          >
+                            <option value="">Select a site...</option>
+                            {sites.map((s) => (
+                              <option key={s.id} value={s.id}>{s.name}</option>
+                            ))}
+                          </select>
+                        ) : (
+                          <span style={{ color: "#999", fontSize: 13 }}>-</span>
+                        )
+                      ) : (
+                        u.siteName || "-"
+                      )}
+                    </td>
+                    <td>
+                      {u.active ? <span style={{ color: "#0ca30c" }}>Active</span> : <span style={{ color: "#999" }}>Disabled</span>}
+                      {u.mustChangePassword && <span style={{ color: "#e8622c", marginLeft: 8, fontSize: 12 }}>Pending first login</span>}
+                    </td>
+                    <td style={{ whiteSpace: "nowrap" }}>
+                      {isEditing ? (
+                        <>
+                          <button onClick={() => saveEdit(u)} disabled={saving} style={linkButtonStyle}>Save</button>
+                          <button onClick={cancelEdit} style={linkButtonStyle}>Cancel</button>
+                        </>
+                      ) : (
+                        <>
+                          <button onClick={() => startEdit(u)} style={linkButtonStyle}>Edit</button>
+                          <button onClick={() => toggleActive(u)} style={linkButtonStyle}>{u.active ? "Disable" : "Enable"}</button>
+                          <button onClick={() => resetPassword(u)} style={linkButtonStyle}>Reset password</button>
+                          <button onClick={() => deleteUser(u)} style={{ ...linkButtonStyle, color: "#d03b3b" }}>Delete</button>
+                        </>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}
