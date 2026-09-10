@@ -17,6 +17,9 @@ const LINKS: NavLink[] = [
   { href: "/requests", label: "POS Requests", roles: ["Admin", "Marketing"] },
   { href: "/hs-check", label: "H&S Check", roles: ["Admin", "Marketing", "H&S", "Store Manager"] },
   { href: "/hs-review", label: "H&S Review", roles: ["Admin", "Marketing", "H&S"] },
+  // Consumables added 10 Sep 2026 - Store Manager submits requests; Admin/
+  // Marketing/Operations (Chris Agnew) see the cross-store dashboard.
+  { href: "/consumables", label: "Consumables", roles: ["Admin", "Marketing", "Operations", "Store Manager"] },
   { href: "/admin/questions", label: "Questions", roles: ["Admin", "H&S"] },
   { href: "/admin/users", label: "Users & Access", roles: ["Admin"] },
 ];

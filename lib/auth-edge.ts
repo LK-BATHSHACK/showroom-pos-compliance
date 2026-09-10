@@ -38,7 +38,9 @@ async function hmac(value: string, secret: string): Promise<string> {
 export const SESSION_COOKIE_NAME = "pos_session";
 const MAX_AGE_MS = 1000 * 60 * 60 * 24 * 30; // 30 days
 
-export type UserRole = "Admin" | "Marketing" | "H&S" | "Store Manager";
+// "Operations" added 10 Sep 2026 for the Consumables Request feature (Chris
+// Agnew) - sees/manages the Consumables dashboard only, nothing else.
+export type UserRole = "Admin" | "Marketing" | "H&S" | "Store Manager" | "Operations";
 
 export type SessionPayload = {
   uid: string; // Users table record id

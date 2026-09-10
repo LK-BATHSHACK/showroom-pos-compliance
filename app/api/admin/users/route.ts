@@ -5,7 +5,7 @@ import { listRecords, createRecords, updateRecords, deleteRecords, TABLES } from
 type UserFields = {
   Name: string;
   Email: string;
-  Role: "Admin" | "Marketing" | "H&S" | "Store Manager";
+  Role: "Admin" | "Marketing" | "H&S" | "Store Manager" | "Operations";
   Site?: string[];
   Active?: boolean;
   MustChangePassword?: boolean;
@@ -51,7 +51,7 @@ export async function POST(req: NextRequest) {
   if (!name || !email || !role) {
     return NextResponse.json({ error: "Name, email and role are required." }, { status: 400 });
   }
-  if (!["Admin", "Marketing", "H&S", "Store Manager"].includes(role)) {
+  if (!["Admin", "Marketing", "H&S", "Store Manager", "Operations"].includes(role)) {
     return NextResponse.json({ error: "Invalid role." }, { status: 400 });
   }
   if (role === "Store Manager" && !siteId) {
@@ -88,7 +88,7 @@ export async function PATCH(req: NextRequest) {
 
   const { id, role, siteId, active, resetPassword } = await req.json();
   if (!id) return NextResponse.json({ error: "Missing id." }, { status: 400 });
-  if (role && !["Admin", "Marketing", "H&S", "Store Manager"].includes(role)) {
+  if (role && !["Admin", "Marketing", "H&S", "Store Manager", "Operations"].includes(role)) {
     return NextResponse.json({ error: "Invalid role." }, { status: 400 });
   }
   // Same rule as creating a new account - a Store Manager without a Site

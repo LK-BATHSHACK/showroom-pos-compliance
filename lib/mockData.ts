@@ -516,6 +516,10 @@ const users: Rec[] = [
   { id: nextId("usr"), createdTime: "2026-08-31T09:00:00.000Z", fields: { Name: "Preview Marketing", Email: "preview.marketing@bathshack.com", PasswordHash: PREVIEW_PASSWORD_HASH, Role: "Marketing", Active: true, MustChangePassword: false } },
   { id: nextId("usr"), createdTime: "2026-08-31T09:00:00.000Z", fields: { Name: "Preview H&S", Email: "preview.hs@bathshack.com", PasswordHash: PREVIEW_PASSWORD_HASH, Role: "H&S", Active: true, MustChangePassword: false } },
   { id: nextId("usr"), createdTime: "2026-08-31T09:00:00.000Z", fields: { Name: "Preview Store Manager", Email: "preview.storemanager@bathshack.com", PasswordHash: PREVIEW_PASSWORD_HASH, Role: "Store Manager", Site: [siteByName("Boucher").id], Active: true, MustChangePassword: false } },
+  // "Operations" role added 10 Sep 2026 for the Consumables Request feature -
+  // Chris Agnew's real account is created the normal way via Users & Access
+  // once deployed; this is just the PREVIEW_MODE stand-in.
+  { id: nextId("usr"), createdTime: "2026-09-10T09:00:00.000Z", fields: { Name: "Preview Operations", Email: "preview.operations@bathshack.com", PasswordHash: PREVIEW_PASSWORD_HASH, Role: "Operations", Active: true, MustChangePassword: false } },
 ];
 
 const submissions: Rec[] = [];
@@ -565,6 +569,81 @@ const hsActions: Rec[] = [
   },
 ];
 
+// ---------------------------------------------------------------------------
+// Consumables Request feature (added 10 Sep 2026 - see lib/consumables.ts).
+// Catalog mirrors the 4 starter items seeded into the real Airtable base the
+// same day; a couple of sample requests/lines across different sites and
+// statuses so the Dashboard tab has something to filter/sort in PREVIEW_MODE.
+// ---------------------------------------------------------------------------
+const consumableItemSeed: { name: string; category: string; unit?: string }[] = [
+  { name: "Toilet Roll", category: "Toilet & Washroom", unit: "rolls" },
+  { name: "Printer Paper", category: "Stationery & Printing", unit: "reams" },
+  { name: "Cash Envelopes", category: "Cash Office", unit: "boxes" },
+  { name: "Cleaning Products (general)", category: "Cleaning & Hygiene" },
+];
+const consumableItems: Rec[] = consumableItemSeed.map((i) => ({
+  id: nextId("cit"),
+  createdTime: "2026-09-10T09:00:00.000Z",
+  fields: { Name: i.name, Category: i.category, Unit: i.unit || "", Active: true },
+}));
+const citByName = (n: string) => consumableItems.find((i) => i.fields.Name === n)!;
+
+const consumablesRequests: Rec[] = [
+  {
+    id: nextId("cnr"),
+    createdTime: "2026-09-05T09:00:00.000Z",
+    fields: {
+      Name: "Boucher - 2026-09-05",
+      Site: [siteByName("Boucher").id],
+      RequestedByName: "Preview Store Manager",
+      RequestedByEmail: "preview.storemanager@bathshack.com",
+      DateRequested: "2026-09-05",
+      Status: "Fulfilled",
+      StatusUpdatedDate: "2026-09-07",
+      StatusUpdatedByName: "Chris Agnew",
+      Notes: "",
+    },
+  },
+  {
+    id: nextId("cnr"),
+    createdTime: "2026-09-08T09:00:00.000Z",
+    fields: {
+      Name: "Cork Showroom - 2026-09-08",
+      Site: [siteByName("Cork Showroom").id],
+      RequestedByName: "Aoife Ryan",
+      RequestedByEmail: "aoife.ryan@bathshack.com",
+      DateRequested: "2026-09-08",
+      Status: "Ordered",
+      StatusUpdatedDate: "2026-09-09",
+      StatusUpdatedByName: "Chris Agnew",
+      Notes: "Running low, would be great by end of next week.",
+    },
+  },
+  {
+    id: nextId("cnr"),
+    createdTime: "2026-09-09T09:00:00.000Z",
+    fields: {
+      Name: "Dublin Showroom - 2026-09-09",
+      Site: [siteByName("Dublin Showroom").id],
+      RequestedByName: "Sean Byrne",
+      RequestedByEmail: "sean.byrne@bathshack.com",
+      DateRequested: "2026-09-09",
+      Status: "Requested",
+      StatusUpdatedDate: "",
+      StatusUpdatedByName: "",
+      Notes: "",
+    },
+  },
+];
+
+const consumablesRequestLines: Rec[] = [
+  { id: nextId("cnl"), createdTime: "2026-09-05T09:00:00.000Z", fields: { Name: "Toilet Roll x 12", Request: [consumablesRequests[0].id], Item: [citByName("Toilet Roll").id], Quantity: 12, Notes: "" } },
+  { id: nextId("cnl"), createdTime: "2026-09-05T09:00:00.000Z", fields: { Name: "Cleaning Products (general) x 6", Request: [consumablesRequests[0].id], Item: [citByName("Cleaning Products (general)").id], Quantity: 6, Notes: "" } },
+  { id: nextId("cnl"), createdTime: "2026-09-08T09:00:00.000Z", fields: { Name: "Printer Paper x 5", Request: [consumablesRequests[1].id], Item: [citByName("Printer Paper").id], Quantity: 5, Notes: "" } },
+  { id: nextId("cnl"), createdTime: "2026-09-09T09:00:00.000Z", fields: { Name: "Cash Envelopes x 2", Request: [consumablesRequests[2].id], Item: [citByName("Cash Envelopes").id], Quantity: 2, Notes: "" } },
+  { id: nextId("cnl"), createdTime: "2026-09-09T09:00:00.000Z", fields: { Name: "Toilet Roll x 8", Request: [consumablesRequests[2].id], Item: [citByName("Toilet Roll").id], Quantity: 8, Notes: "" } },
+];
+
 const store: Record<string, Rec[]> = {
   [TABLES.SETTINGS]: settings,
   [TABLES.SHOWROOMS]: showrooms,
@@ -580,6 +659,9 @@ const store: Record<string, Rec[]> = {
   [TABLES.ROSTERS]: rosters,
   [TABLES.SUBMISSIONS]: submissions,
   [TABLES.ANSWERS]: answers,
+  [TABLES.CONSUMABLE_ITEMS]: consumableItems,
+  [TABLES.CONSUMABLES_REQUESTS]: consumablesRequests,
+  [TABLES.CONSUMABLES_REQUEST_LINES]: consumablesRequestLines,
 };
 
 function tablePrefix(table: string) {

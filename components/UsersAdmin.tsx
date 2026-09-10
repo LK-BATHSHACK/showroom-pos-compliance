@@ -17,7 +17,7 @@ type UserRow = {
 
 type SiteOption = { id: string; name: string };
 
-const ROLES = ["Admin", "Marketing", "H&S", "Store Manager"];
+const ROLES = ["Admin", "Marketing", "H&S", "Store Manager", "Operations"];
 
 export default function UsersAdmin() {
   const [users, setUsers] = useState<UserRow[]>([]);

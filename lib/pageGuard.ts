@@ -22,6 +22,8 @@ export function homeForRole(role: UserRole): string {
       return "/hs-check";
     case "H&S":
       return "/hs-review";
+    case "Operations":
+      return "/consumables";
     default:
       return "/dashboard";
   }

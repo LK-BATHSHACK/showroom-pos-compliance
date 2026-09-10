@@ -228,4 +228,8 @@ export const TABLES = {
   ROSTERS: "Rosters",
   SUBMISSIONS: "Submissions",
   ANSWERS: "Answers",
+  // Consumables Request feature (added 10 Sep 2026 - see lib/consumables.ts).
+  CONSUMABLE_ITEMS: "Consumable Items",
+  CONSUMABLES_REQUESTS: "Consumables Requests",
+  CONSUMABLES_REQUEST_LINES: "Consumables Request Lines",
 } as const;
