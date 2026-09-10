@@ -522,8 +522,46 @@ const users: Rec[] = [
   { id: nextId("usr"), createdTime: "2026-09-10T09:00:00.000Z", fields: { Name: "Preview Operations", Email: "preview.operations@bathshack.com", PasswordHash: PREVIEW_PASSWORD_HASH, Role: "Operations", Active: true, MustChangePassword: false } },
 ];
 
-const submissions: Rec[] = [];
-const answers: Rec[] = [];
+// One real Submission+Answer pair from "last month" (2026-08), so the
+// Showroom Scores "recurring issue" check (10 Sep 2026 - see
+// ShowroomScoresPanel.tsx) has something genuine to match against when a
+// fresh issue gets raised for the same site+question this month via the
+// live form in PREVIEW_MODE testing. Every other hsActions entry below uses
+// a fake unresolvable SourceAnswer purely to test label/classification
+// logic (see the comment above hsActions) - this one is real end-to-end so
+// the Action -> Answer -> TemplateQuestion join actually resolves.
+//
+// Deliberately Q26 (the "Report issue here" free-text follow-up), not Q22
+// itself - Q22's own Single choice answer never raises an Action on its own
+// (it's not in ISSUE_FIELD_QUESTION_NUMBERS/SINGLE_CHOICE_FLAG_VALUES in
+// lib/hsSubmission.ts), only Q26's free text does. So a same-issue-again
+// scenario submitted live always resolves back to Q26.
+const lastMonthAntrimSubmission: Rec = {
+  id: nextId("sub"),
+  createdTime: "2026-08-20T09:00:00.000Z",
+  fields: {
+    SubmissionName: "Antrim Showroom - 2026-08-20",
+    Site: [siteByName("Antrim Showroom").id],
+    ChecklistTemplate: [hsTemplateId],
+    Status: "Submitted",
+    SubmissionType: "Self-Reported (Monthly)",
+    SubmissionDate: "2026-08-20",
+    CompletedByName: "Preview Store Manager",
+    CompletedByEmail: "preview.storemanager@bathshack.com",
+  },
+};
+const lastMonthAntrimQ26Answer: Rec = {
+  id: nextId("ans"),
+  createdTime: "2026-08-20T09:00:00.000Z",
+  fields: {
+    AnswerName: "Antrim Showroom Q26 - 2026-08-20",
+    Submission: [lastMonthAntrimSubmission.id],
+    TemplateQuestion: [tqByQnum(26).id],
+    AnswerText: "Trailing cable near entrance.",
+  },
+};
+const submissions: Rec[] = [lastMonthAntrimSubmission];
+const answers: Rec[] = [lastMonthAntrimQ26Answer];
 
 // H&S-sourced Actions (SourceAnswer set, no Showroom link - Site instead),
 // for exercising the Actions Tracker's H&S-specific behaviour in preview:
@@ -545,6 +583,27 @@ const hsActions: Rec[] = [
       OwnerEmail: "preview.storemanager@bathshack.com",
       DateIdentified: "2026-09-05",
       TargetCompletionDate: "2026-09-26",
+      Status: "Open",
+      UrgencyClass: "Digest",
+    },
+  },
+  // Real (not fake-ID) action from LAST month, still Open - matched against
+  // by lib/mockData.ts's lastMonthAntrimQ26Answer above, so a Q26 issue
+  // freshly raised for Antrim Showroom THIS month (via a live submission in
+  // Playwright testing) should make Showroom Scores mark Antrim RED with
+  // "recurring" as the reason.
+  {
+    id: nextId("act"),
+    createdTime: "2026-08-20T09:00:00.000Z",
+    fields: {
+      Site: [siteByName("Antrim Showroom").id],
+      SourceAnswer: [lastMonthAntrimQ26Answer.id],
+      IssueDescription: "(Q26 - Hazards & Housekeeping Standards) Trailing cable near entrance.",
+      Priority: "Medium",
+      OwnerName: "Preview Store Manager",
+      OwnerEmail: "preview.storemanager@bathshack.com",
+      DateIdentified: "2026-08-20",
+      TargetCompletionDate: "2026-09-10",
       Status: "Open",
       UrgencyClass: "Digest",
     },

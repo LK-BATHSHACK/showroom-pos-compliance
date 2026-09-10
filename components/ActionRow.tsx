@@ -27,6 +27,12 @@ export default function ActionRow({
   onResolved?: (resolutionNotes: string) => void;
 }) {
   const [status, setStatus] = useState<string>(action.fields.Status);
+  // Mirrors action.fields, but overlaid with whatever the server actually
+  // saved on a status change (ResolutionNotes / MaintenancePlanner* etc) so
+  // the note panels below show up immediately rather than only after a page
+  // reload - the `action` prop itself is a one-time server snapshot that
+  // doesn't otherwise update just because local `status` did.
+  const [fields, setFields] = useState<Record<string, any>>(action.fields);
   const [busy, setBusy] = useState(false);
   const overdue = action.fields.TargetCompletionDate && action.fields.TargetCompletionDate < new Date().toISOString().slice(0, 10);
 
@@ -36,22 +42,35 @@ export default function ActionRow({
   // row, since a browser popup wasn't what she pictured. Ticking the box
   // reveals the notes field; unticking it cancels without saving (same
   // "cancel = no change" behaviour the old prompt() had on Cancel).
-  const [resolving, setResolving] = useState(false);
+  //
+  // "MP" (added to Maintenance Planner) added 10 Sep 2026 - Lorraine: "could
+  // there be another button perhaps called MP that doesn't fully CLOSE the
+  // issue, but 'part closes' it... Zara's bit is resolved, but it's worth
+  // keeping 'open' until we can close the loop and say the work has been
+  // completed." Same tick-box-then-notes shape as Resolved, just a
+  // different destination status that deliberately does NOT count as
+  // resolved anywhere else in the app (stays in the open list, still counts
+  // toward "open" KPIs, still eligible to be marked Resolved later once the
+  // work's actually done). `pending` replaces the old boolean `resolving` so
+  // only one of the two areas can be open at a time.
+  const [pending, setPending] = useState<"resolve" | "mp" | null>(null);
   const [notes, setNotes] = useState("");
 
-  async function updateStatus(newStatus: "In progress" | "Resolved", resolutionNotes = "") {
+  async function updateStatus(newStatus: "In progress" | "Resolved" | "Added to Maintenance Planner", noteText = "") {
     setBusy(true);
     const res = await fetch(`/api/action/${action.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status: newStatus, resolutionNotes }),
+      body: JSON.stringify({ status: newStatus, notes: noteText }),
     });
+    const body = await res.json().catch(() => ({}));
     setBusy(false);
     if (res.ok) {
       setStatus(newStatus);
-      setResolving(false);
+      if (body.record?.fields) setFields((f) => ({ ...f, ...body.record.fields }));
+      setPending(null);
       setNotes("");
-      if (newStatus === "Resolved") onResolved?.(resolutionNotes);
+      if (newStatus === "Resolved") onResolved?.(noteText);
     }
   }
 
@@ -75,7 +94,7 @@ export default function ActionRow({
       <td style={{ color: overdue ? "#d03b3b" : undefined, fontWeight: overdue ? 600 : 400 }}>
         {action.fields.TargetCompletionDate} {overdue ? "(overdue)" : ""}
       </td>
-      <td style={{ minWidth: resolving ? 220 : undefined }}>
+      <td style={{ minWidth: pending ? 220 : undefined }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
             {status === "Open" && (
@@ -92,15 +111,38 @@ export default function ActionRow({
                 Start
               </button>
             )}
+            {/* Resolved stays available even once something is "Added to
+                Maintenance Planner" - MP is a part-close, not a close, so
+                the loop still needs closing later once the work's actually
+                done (Lorraine, 10 Sep 2026). */}
+            {(status === "Open" || status === "In progress" || status === "Added to Maintenance Planner") && (
+              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, cursor: "pointer" }}>
+                <input
+                  type="checkbox"
+                  checked={pending === "resolve"}
+                  disabled={busy}
+                  onChange={(e) => setPending(e.target.checked ? "resolve" : null)}
+                />
+                Resolved
+              </label>
+            )}
+            {/* "MP" (added to Maintenance Planner) - Lorraine, 10 Sep 2026:
+                "someone raises an issue, Zara adds to the maintenance
+                planner - we need to perhaps not say RESOLVED because Rory
+                might not get to it for a couple of months... Zara's bit is
+                resolved, but it's worth keeping 'open' until we can close
+                the loop." Only offered before it's already been MP'd -
+                once it has, the only way forward is Resolved (or leave it
+                as is). */}
             {(status === "Open" || status === "In progress") && (
               <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, cursor: "pointer" }}>
                 <input
                   type="checkbox"
-                  checked={resolving}
+                  checked={pending === "mp"}
                   disabled={busy}
-                  onChange={(e) => setResolving(e.target.checked)}
+                  onChange={(e) => setPending(e.target.checked ? "mp" : null)}
                 />
-                Resolved
+                MP
               </label>
             )}
             {status === "Resolved" && (
@@ -115,20 +157,36 @@ export default function ActionRow({
               above were being saved (Round 8) but never displayed anywhere
               once a row moved to Resolved. Shown for any resolved action that
               has notes, not just H&S, since the field/flow is shared. */}
-          {status === "Resolved" && action.fields.ResolutionNotes && (
+          {status === "Resolved" && fields.ResolutionNotes && (
             <div style={{ fontSize: 12, color: "#333", background: "#F5F5F5", borderRadius: 4, padding: "6px 8px", maxWidth: 260 }}>
               <span style={{ color: "#6E6E6E" }}>How it was resolved: </span>
-              {action.fields.ResolutionNotes}
+              {fields.ResolutionNotes}
             </div>
           )}
-          {/* Resolution area - appears once "Resolved" is ticked. Untick to
-              cancel (no PATCH sent, nothing saved). */}
-          {resolving && (
+          {status === "Added to Maintenance Planner" && (
+            <div style={{ fontSize: 12, color: "#333", background: "#E8EEFF", borderRadius: 4, padding: "6px 8px", maxWidth: 260 }}>
+              <span style={{ color: "#3348B0", fontWeight: 600 }}>Added to maintenance planner</span>
+              {fields.MaintenancePlannerByName && (
+                <>
+                  {" "}
+                  by {fields.MaintenancePlannerByName}
+                  {fields.MaintenancePlannerDate ? ` - ${fields.MaintenancePlannerDate}` : ""}
+                </>
+              )}
+              {fields.MaintenancePlannerNotes && (
+                <div style={{ marginTop: 2 }}>{fields.MaintenancePlannerNotes}</div>
+              )}
+            </div>
+          )}
+          {/* Resolution/MP notes area - appears once either box is ticked.
+              Untick to cancel (no PATCH sent, nothing saved). Shares one
+              textarea since only one can be open at a time. */}
+          {pending && (
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               <textarea
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
-                placeholder="How was this resolved? (optional)"
+                placeholder={pending === "resolve" ? "How was this resolved? (optional)" : "Note for the maintenance planner? (optional)"}
                 rows={2}
                 style={{
                   fontSize: 12,
@@ -141,8 +199,17 @@ export default function ActionRow({
               />
               <button
                 disabled={busy}
-                onClick={() => updateStatus("Resolved", notes)}
-                style={{ background: "#0ca30c", color: "#fff", border: "none", borderRadius: 4, padding: "4px 10px", fontSize: 12, cursor: "pointer", alignSelf: "flex-start" }}
+                onClick={() => updateStatus(pending === "resolve" ? "Resolved" : "Added to Maintenance Planner", notes)}
+                style={{
+                  background: pending === "resolve" ? "#0ca30c" : "#3348B0",
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: 4,
+                  padding: "4px 10px",
+                  fontSize: 12,
+                  cursor: "pointer",
+                  alignSelf: "flex-start",
+                }}
               >
                 Save
               </button>

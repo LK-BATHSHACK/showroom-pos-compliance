@@ -12,18 +12,33 @@ import { requireRole } from "@/lib/auth";
 // it (and Status only flips to "Verified-Closed") once the NEXT independent
 // audit actually reports that POS item as Present-OK again - see the
 // auto-verification step in processAuditSubmission.ts.
+//
+// "Added to Maintenance Planner" ("MP") added 10 Sep 2026 (Lorraine: "could
+// there be another button... that doesn't fully CLOSE the issue, but 'part
+// closes' it"). Deliberately NOT treated as resolved anywhere - it's a
+// distinct status so the issue stays visible as still-outstanding (open
+// KPIs, Showroom Scores recurrence check, etc) until someone later marks it
+// properly Resolved once the actual work is done.
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
   const session = await requireRole(["Admin", "Marketing", "H&S"]);
   if (!session) return NextResponse.json({ error: "Forbidden." }, { status: 403 });
 
   try {
-    const { status, resolutionNotes } = await req.json();
-    if (!["Open", "In progress", "Resolved"].includes(status)) {
+    const { status, notes } = await req.json();
+    if (!["Open", "In progress", "Resolved", "Added to Maintenance Planner"].includes(status)) {
       return NextResponse.json({ error: "Invalid status." }, { status: 400 });
     }
     const today = new Date().toISOString().slice(0, 10);
-    const fields: Record<string, any> = { Status: status, ResolutionNotes: resolutionNotes || "" };
-    if (status === "Resolved") fields.DateCompleted = today;
+    const fields: Record<string, any> = { Status: status };
+    if (status === "Resolved") {
+      fields.ResolutionNotes = notes || "";
+      fields.DateCompleted = today;
+    }
+    if (status === "Added to Maintenance Planner") {
+      fields.MaintenancePlannerNotes = notes || "";
+      fields.MaintenancePlannerDate = today;
+      fields.MaintenancePlannerByName = session.name;
+    }
 
     const [updated] = await updateRecords<any>(TABLES.ACTIONS, [{ id: params.id, fields }]);
     return NextResponse.json({ success: true, record: updated });

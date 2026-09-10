@@ -43,7 +43,11 @@ export async function GET(req: NextRequest) {
 
   const overdue = showrooms.filter((s) => s.fields.NextAuditDue && s.fields.NextAuditDue < today);
 
-  const openActions = actionRecords.filter((a: any) => a.fields.Status === "Open" || a.fields.Status === "In progress");
+  // "Added to Maintenance Planner" counts as still-open (10 Sep 2026) - a
+  // part-close, not a close.
+  const openActions = actionRecords.filter(
+    (a: any) => a.fields.Status === "Open" || a.fields.Status === "In progress" || a.fields.Status === "Added to Maintenance Planner"
+  );
   const priorityOrder = ["Critical", "High", "Medium", "Low"];
   const openByPriority: Record<string, number> = { Critical: 0, High: 0, Medium: 0, Low: 0 };
   openActions.forEach((a: any) => {

@@ -68,7 +68,11 @@ export default async function DashboardPage() {
   );
   const hsAvgScore = estateHSAverage(hsSiteScores);
   const hsNotYetWalked = hsSiteScores.filter((s) => s.score === null).length;
-  const hsOpenActions = hsActions.filter((a) => a.fields.Status === "Open" || a.fields.Status === "In progress");
+  // "Added to Maintenance Planner" counts as still-open (10 Sep 2026) - a
+  // part-close, not a close.
+  const hsOpenActions = hsActions.filter(
+    (a) => a.fields.Status === "Open" || a.fields.Status === "In progress" || a.fields.Status === "Added to Maintenance Planner"
+  );
 
   const showrooms = showroomRecords.filter((r) => r.fields.Active !== false);
   const today = new Date().toISOString().slice(0, 10);
@@ -103,7 +107,9 @@ export default async function DashboardPage() {
   // SourceAuditLineItem-present-means-POS discriminator used on the Actions
   // tab, so this KPI isn't silently inflated by H&S findings.
   const posActions = actionRecords.filter((a) => (a.fields.SourceAuditLineItem || []).length > 0);
-  const openActions = posActions.filter((a) => a.fields.Status === "Open" || a.fields.Status === "In progress");
+  const openActions = posActions.filter(
+    (a) => a.fields.Status === "Open" || a.fields.Status === "In progress" || a.fields.Status === "Added to Maintenance Planner"
+  );
   const criticalHighOpen = openActions.filter((a) => a.fields.Priority === "Critical" || a.fields.Priority === "High").length;
 
   return (

@@ -94,8 +94,25 @@ export default async function HSReviewPage({
     const question = questionId ? questionById.get(questionId) : undefined;
     return question?.Section || null;
   };
+  // Same join again, just the raw question number - powers the Showroom
+  // Scores "recurring issue" check below (Salli, 10 Sep 2026: RED should
+  // include "something that has been brought to our attention in 2
+  // consecutive checklists (and hasn't been resolved)" - matched by which
+  // question raised it, same site, this month vs last month).
+  const questionNumberFor = (action: (typeof hsActions)[number]): number | null => {
+    const answerId = action.fields.SourceAnswer?.[0];
+    const answer = answerId ? answerById.get(answerId) : undefined;
+    const questionId = answer?.fields.TemplateQuestion?.[0];
+    const question = questionId ? questionById.get(questionId) : undefined;
+    return question?.QuestionNumber ?? null;
+  };
 
-  const openHsActions = hsActions.filter((a) => a.fields.Status === "Open" || a.fields.Status === "In progress");
+  // "Added to Maintenance Planner" counts as still-open here (10 Sep 2026) -
+  // it's a part-close, not a close, so it should keep showing as an open
+  // follow-up action until someone marks it properly Resolved.
+  const openHsActions = hsActions.filter(
+    (a) => a.fields.Status === "Open" || a.fields.Status === "In progress" || a.fields.Status === "Added to Maintenance Planner"
+  );
   const rosterMismatches = openHsActions.filter((a) => (a.fields.RosterMismatch || []).length > 0);
 
   // Monthly log filter - "filter each store and get results that were
@@ -290,6 +307,7 @@ export default async function HSReviewPage({
         dateIdentified: a.fields.DateIdentified || "",
         status: a.fields.Status || "",
         urgencyClass: a.fields.UrgencyClass,
+        questionNumber: questionNumberFor(a),
       }))}
     />
   );

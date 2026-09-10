@@ -10,6 +10,10 @@ export type ScoreAction = {
   dateIdentified: string;
   status: string;
   urgencyClass?: string;
+  // Which question raised this (Q22, Q31, etc) - null for anything that
+  // isn't traceable back to a question (shouldn't normally happen for H&S
+  // actions). Used to spot the same issue recurring month to month.
+  questionNumber?: number | null;
 };
 
 type Tier = "not-audited" | "green" | "amber" | "amber-dark" | "red";
@@ -28,42 +32,58 @@ const TIER_META: Record<Tier, { label: string; score: number | null; bg: string;
 // issues, AMBER / 3 - more than 2 issues, Darker AMBER / 5 - Urgent safety
 // concern or issues unresolved in over 1 month, RED."
 //
-// Two things had to be assumed rather than confirmed with Lorraine (flagged
-// here the same way HS_MONTHLY_DUE_DAY is flagged in lib/hsSubmission.ts):
-// - "Urgent safety concern" = an action raised with UrgencyClass "Immediate"
-//   (the same flag that already triggers the accident/incident escalation
-//   email) at that site in that month.
-// - "Unresolved in over 1 month" = the site currently has ANY action still
-//   Open/In progress whose DateIdentified is more than 30 days ago, checked
-//   against today's real date rather than the selected month's end - this
-//   is inherently a snapshot ("how stale is this site's queue right now"),
-//   not something that can be reconstructed cleanly for a past month.
-const STALE_DAYS = 30;
+// RED's definition refined with Salli 10 Sep 2026, after she questioned how
+// reliably "urgent" could ever be judged automatically ("I don't think we
+// have ever had one to be honest, as they usually just phone at the time!!"
+// - i.e. genuine emergencies bypass the form entirely, so leaning on an
+// AI-judged "is this dangerous" reading of free text was never going to be
+// the real trigger). Her confirmed definition: RED if the checklist raised
+// something that's "a serious danger, OR something that has been brought to
+// our attention in 2 consecutive checklists (and hasn't been resolved)".
+// This REPLACES the earlier "any action open >30 days, checked against
+// today" assumption (that was never confirmed - flagged the same way
+// HS_MONTHLY_DUE_DAY is flagged in lib/hsSubmission.ts) with something
+// concrete and actually matching "month on month" from her original ask:
+// - "Serious danger" -> still UrgencyClass "Immediate" (the same structured
+//   flag the accident/incident escalation email already fires on) - this
+//   isn't the AI-judges-free-text case Salli was wary of, it's a specific
+//   known question shape (Q9/Q34 etc "has there been an accident/incident"
+//   style questions), so it stays as the "serious danger" trigger.
+// - "2 consecutive checklists, unresolved" -> matched by which QUESTION
+//   raised the issue (same site, same question number) appearing in both
+//   this month's and last month's actions, where the earlier month's action
+//   is still not Resolved/Verified-Closed (an "MP"'d action counts as still
+//   unresolved here - it's a part-close, not a close, see ActionRow.tsx).
+function prevMonthOf(month: string): string {
+  const [y, m] = month.split("-").map(Number);
+  const d = new Date(Date.UTC(y, m - 2, 1)); // m is 1-indexed; m-2 = previous month, 0-indexed
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
 
 function computeScore(
   site: ScoreSite,
   month: string,
   submissions: ScoreSubmission[],
-  actions: ScoreAction[],
-  todayStr: string
-): { tier: Tier; issueCount: number; urgent: boolean; stale: boolean } {
+  actions: ScoreAction[]
+): { tier: Tier; issueCount: number; urgent: boolean; recurring: boolean } {
   const auditedThisMonth = submissions.some((s) => s.siteId === site.id && s.date.startsWith(month));
+  const prevMonth = prevMonthOf(month);
   const actionsThisMonth = actions.filter((a) => a.siteId === site.id && a.dateIdentified.startsWith(month));
+  const actionsPrevMonth = actions.filter((a) => a.siteId === site.id && a.dateIdentified.startsWith(prevMonth));
   const issueCount = actionsThisMonth.length;
   const urgent = actionsThisMonth.some((a) => a.urgencyClass === "Immediate");
-  const stale = actions.some((a) => {
-    if (a.siteId !== site.id) return false;
-    if (a.status !== "Open" && a.status !== "In progress") return false;
-    if (!a.dateIdentified) return false;
-    const days = (Date.parse(todayStr) - Date.parse(a.dateIdentified)) / (1000 * 60 * 60 * 24);
-    return days > STALE_DAYS;
+  const recurring = actionsThisMonth.some((cur) => {
+    if (cur.questionNumber == null) return false;
+    const matchInPrevMonth = actionsPrevMonth.find((p) => p.questionNumber === cur.questionNumber);
+    if (!matchInPrevMonth) return false;
+    return matchInPrevMonth.status !== "Resolved" && matchInPrevMonth.status !== "Verified-Closed";
   });
 
-  if (!auditedThisMonth) return { tier: "not-audited", issueCount, urgent, stale };
-  if (urgent || stale) return { tier: "red", issueCount, urgent, stale };
-  if (issueCount > 2) return { tier: "amber-dark", issueCount, urgent, stale };
-  if (issueCount >= 1) return { tier: "amber", issueCount, urgent, stale };
-  return { tier: "green", issueCount, urgent, stale };
+  if (!auditedThisMonth) return { tier: "not-audited", issueCount, urgent, recurring };
+  if (urgent || recurring) return { tier: "red", issueCount, urgent, recurring };
+  if (issueCount > 2) return { tier: "amber-dark", issueCount, urgent, recurring };
+  if (issueCount >= 1) return { tier: "amber", issueCount, urgent, recurring };
+  return { tier: "green", issueCount, urgent, recurring };
 }
 
 export default function ShowroomScoresPanel({
@@ -81,9 +101,9 @@ export default function ShowroomScoresPanel({
   const rows = useMemo(
     () =>
       sites
-        .map((site) => ({ site, ...computeScore(site, month, submissions, actions, today) }))
+        .map((site) => ({ site, ...computeScore(site, month, submissions, actions) }))
         .sort((a, b) => a.site.name.localeCompare(b.site.name)),
-    [sites, submissions, actions, month, today]
+    [sites, submissions, actions, month]
   );
 
   const scored = rows.filter((r) => r.tier !== "not-audited");
@@ -129,8 +149,8 @@ export default function ShowroomScoresPanel({
             const meta = TIER_META[r.tier];
             let why = "";
             if (r.tier === "not-audited") why = "No H&S walkaround submitted for this month yet.";
-            else if (r.tier === "red" && r.urgent) why = "Urgent safety concern raised this month.";
-            else if (r.tier === "red" && r.stale) why = "Has an action open/in progress for more than 30 days.";
+            else if (r.tier === "red" && r.urgent) why = "Serious/urgent safety concern raised this month.";
+            else if (r.tier === "red" && r.recurring) why = "Also flagged in last month's checklist and still not resolved.";
             else if (r.tier === "amber-dark") why = `${r.issueCount} issues raised this month.`;
             else if (r.tier === "amber") why = `${r.issueCount} issue${r.issueCount === 1 ? "" : "s"} raised this month.`;
             else if (r.tier === "green") why = "No issues raised this month.";
