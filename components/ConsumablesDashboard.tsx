@@ -18,6 +18,7 @@ type Row = {
   notes: string | null;
   lines: Line[];
 };
+type CatalogItem = { id: string; name: string; category: string | null; unit: string | null; active: boolean };
 
 const STATUSES = ["Requested", "Ordered", "Fulfilled"];
 const STATUS_STYLE: Record<string, { bg: string; fg: string }> = {
@@ -26,7 +27,22 @@ const STATUS_STYLE: Record<string, { bg: string; fg: string }> = {
   Fulfilled: { bg: "#DFF5DF", fg: "#1E7A1E" },
 };
 
-export default function ConsumablesDashboard({ rows, canManageStatus }: { rows: Row[]; canManageStatus: boolean }) {
+// Mirrors the live Category field's choices (lib/consumables.ts's
+// CONSUMABLE_CATEGORIES) - kept as a small local copy rather than importing
+// server-only code into this client component.
+const CATEGORIES = ["Toilet & Washroom", "Stationery & Printing", "Cash Office", "Cleaning & Hygiene", "Other"];
+
+export default function ConsumablesDashboard({
+  rows,
+  catalog,
+  canManageStatus,
+  canManageCatalog,
+}: {
+  rows: Row[];
+  catalog: CatalogItem[];
+  canManageStatus: boolean;
+  canManageCatalog: boolean;
+}) {
   const router = useRouter();
   const [site, setSite] = useState("");
   const [item, setItem] = useState("");
@@ -34,6 +50,15 @@ export default function ConsumablesDashboard({ rows, canManageStatus }: { rows: 
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [savingId, setSavingId] = useState<string | null>(null);
+
+  // "Add item" (Lorraine, 10 Sep 2026: "allow admin to add in more when
+  // needed with an add button") - Admin-only, see app/api/consumable-items.
+  const [addingItem, setAddingItem] = useState(false);
+  const [newItemName, setNewItemName] = useState("");
+  const [newItemCategory, setNewItemCategory] = useState(CATEGORIES[0]);
+  const [newItemUnit, setNewItemUnit] = useState("");
+  const [savingItem, setSavingItem] = useState(false);
+  const [itemError, setItemError] = useState("");
 
   const sites = useMemo(() => Array.from(new Set(rows.map((r) => r.siteName))).sort(), [rows]);
   const items = useMemo(
@@ -93,11 +118,105 @@ export default function ConsumablesDashboard({ rows, canManageStatus }: { rows: 
     router.refresh();
   }
 
+  async function saveNewItem() {
+    if (!newItemName.trim()) {
+      setItemError("Give the item a name.");
+      return;
+    }
+    setSavingItem(true);
+    setItemError("");
+    const res = await fetch("/api/consumable-items", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: newItemName.trim(), category: newItemCategory, unit: newItemUnit.trim() }),
+    });
+    const body = await res.json().catch(() => ({}));
+    setSavingItem(false);
+    if (res.ok) {
+      setNewItemName("");
+      setNewItemUnit("");
+      setNewItemCategory(CATEGORIES[0]);
+      setAddingItem(false);
+      router.refresh();
+    } else {
+      setItemError(body.error || "Couldn't add that item - try again.");
+    }
+  }
+
   const selectStyle: React.CSSProperties = { padding: "6px 8px", border: "1px solid #ccc", borderRadius: 6, fontSize: 13 };
 
   return (
     <div>
-      <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 20 }}>
+      {/* "Manage catalog" (Lorraine, 10 Sep 2026: "allow admin to add in more
+          when needed with an add button") - Admin only, so a new item can be
+          added straight from here without needing Airtable access. */}
+      {canManageCatalog && (
+        <Card title="Consumables catalog">
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 18px", marginBottom: 12, fontSize: 13, color: "#333" }}>
+            {catalog.map((c) => (
+              <span key={c.id}>
+                {c.name}
+                {c.unit ? <span style={{ color: "#999" }}> ({c.unit})</span> : null}
+              </span>
+            ))}
+            {catalog.length === 0 && <span style={{ color: "#999" }}>No items in the catalog yet.</span>}
+          </div>
+          {!addingItem ? (
+            <button
+              onClick={() => setAddingItem(true)}
+              style={{ background: "#E6017E", color: "#fff", border: "none", borderRadius: 6, padding: "6px 14px", fontSize: 13, cursor: "pointer" }}
+            >
+              + Add item
+            </button>
+          ) : (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+              <input
+                type="text"
+                placeholder="Item name"
+                value={newItemName}
+                onChange={(e) => setNewItemName(e.target.value)}
+                style={{ ...selectStyle, minWidth: 180 }}
+              />
+              <select value={newItemCategory} onChange={(e) => setNewItemCategory(e.target.value)} style={selectStyle}>
+                {CATEGORIES.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+              <input
+                type="text"
+                placeholder="Unit (optional, e.g. rolls, boxes)"
+                value={newItemUnit}
+                onChange={(e) => setNewItemUnit(e.target.value)}
+                style={{ ...selectStyle, minWidth: 180 }}
+              />
+              <button
+                disabled={savingItem}
+                onClick={saveNewItem}
+                style={{ background: "#0ca30c", color: "#fff", border: "none", borderRadius: 6, padding: "6px 14px", fontSize: 13, cursor: "pointer" }}
+              >
+                Save
+              </button>
+              <button
+                disabled={savingItem}
+                onClick={() => {
+                  setAddingItem(false);
+                  setItemError("");
+                  setNewItemName("");
+                  setNewItemUnit("");
+                }}
+                style={{ background: "none", border: "1px solid #ccc", borderRadius: 6, padding: "6px 14px", fontSize: 13, cursor: "pointer" }}
+              >
+                Cancel
+              </button>
+              {itemError && <span style={{ color: "#d03b3b", fontSize: 12 }}>{itemError}</span>}
+            </div>
+          )}
+        </Card>
+      )}
+
+      <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 20, marginTop: canManageCatalog ? 20 : 0 }}>
         <KpiCard label="Requests (filtered)" value={visible.length} />
         <KpiCard label="Not yet fulfilled" value={openCount} />
         <KpiCard label="Top item requested" value={topItemLabel} />

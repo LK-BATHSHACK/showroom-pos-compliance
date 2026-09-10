@@ -47,7 +47,14 @@ export default async function ConsumablesPage() {
     tabs.push({
       key: "Dashboard",
       label: "Dashboard",
-      content: <ConsumablesDashboard rows={requests} canManageStatus={session.role === "Admin" || session.role === "Operations"} />,
+      content: (
+        <ConsumablesDashboard
+          rows={requests}
+          catalog={catalog}
+          canManageStatus={session.role === "Admin" || session.role === "Operations"}
+          canManageCatalog={session.role === "Admin"}
+        />
+      ),
     });
   }
 
@@ -55,8 +62,8 @@ export default async function ConsumablesPage() {
     <div>
       <h1 style={{ fontSize: 24, marginBottom: 4 }}>Consumables</h1>
       <p style={{ color: "#6E6E6E", marginTop: 0, marginBottom: 24 }}>
-        Request everyday items (toilet paper, printer paper, cash envelopes, cleaning products, and anything else Chris adds to the
-        list) - each request goes straight to Chris Agnew.
+        Request everyday items (toilet roll, cleaning supplies, stationery, printer toner, cash envelopes, and anything else added to
+        the list) - each request goes straight to Chris Agnew.
       </p>
       <ConsumablesTabs tabs={tabs} />
     </div>

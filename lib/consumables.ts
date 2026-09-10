@@ -1,11 +1,11 @@
 // Consumables Request feature (added 10 Sep 2026, Lorraine: "add a
 // consumables request section for managers to be able to request items -
 // when they submit a request it must go to Chris Agnew"). Three new tables:
-//   - Consumable Items: the catalog (toilet paper, printer paper, cash
-//     envelopes, cleaning products, etc). Store Managers pick from this list
-//     rather than free-typing, so the dashboard can report cleanly on "who's
-//     ordering what". Chris/Admin can add more rows in Airtable any time -
-//     nothing here needs a code change to add a new item.
+//   - Consumable Items: the catalog (toilet roll, blue roll, glass cleaner,
+//     hoover bags, micro fibre cloths, hand soap, A4 paper, printer toners,
+//     cash envelopes, etc). Store Managers pick from this list rather than
+//     free-typing, so the dashboard can report cleanly on "who's ordering
+//     what".
 //   - Consumables Requests: one row per "basket" a manager submits (one
 //     request can contain several items - Lorraine confirmed this should be
 //     a single submission, not one request per item).
@@ -16,9 +16,26 @@
 // Ordered -> Fulfilled, lives on the Consumables Requests record (the whole
 // basket moves together, not per line item - simplest match for "order the
 // basket, mark it done once it all turns up").
+//
+// Catalog management (added 10 Sep 2026, Lorraine: "allow admin to add in
+// more when needed with an add button") - Admin can add a new catalog item
+// straight from the Dashboard tab (see ConsumablesDashboard.tsx and
+// app/api/consumable-items/route.ts), rather than needing Airtable access.
+// Category is picked from the existing fixed list (CONSUMABLE_CATEGORIES,
+// mirroring the live Category field's choices) rather than free-typed, so a
+// new item still slots into the existing "top items"/"by category" reporting
+// cleanly - it doesn't invent new categories.
 
 import { listRecords, createRecords, updateRecords, TABLES } from "./airtable";
 import { sendEmail, emailShell } from "./resend";
+
+export const CONSUMABLE_CATEGORIES = [
+  "Toilet & Washroom",
+  "Stationery & Printing",
+  "Cash Office",
+  "Cleaning & Hygiene",
+  "Other",
+] as const;
 
 export type ConsumableItem = {
   id: string;
@@ -190,4 +207,19 @@ export async function updateConsumablesRequestStatus(id: string, status: string,
   await updateRecords(TABLES.CONSUMABLES_REQUESTS, [
     { id, fields: { Status: status, StatusUpdatedDate: today, StatusUpdatedByName: updatedByName } },
   ]);
+}
+
+/** Adds a new item to the Consumable Items catalog (Admin, via the Dashboard's "Add item" form). */
+export async function createConsumableItem(input: { name: string; category: string; unit?: string }): Promise<ConsumableItem> {
+  const [created] = await createRecords<{ Name: string; Category?: string; Unit?: string; Active?: boolean }>(
+    TABLES.CONSUMABLE_ITEMS,
+    [{ Name: input.name.trim(), Category: input.category, Unit: (input.unit || "").trim(), Active: true }]
+  );
+  return {
+    id: created.id,
+    name: created.fields.Name,
+    category: created.fields.Category || null,
+    unit: created.fields.Unit || null,
+    active: true,
+  };
 }
