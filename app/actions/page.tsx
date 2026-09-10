@@ -13,13 +13,32 @@ export default async function ActionsPage() {
   // pick which tab (All vs H&S) an H&S login should land on by default.
   const session = await getSession();
 
-  const [actionRecords, showroomRecords, siteRecords, lineItemRecords, auditRecords] = await Promise.all([
+  const [actionRecords, showroomRecords, siteRecords, lineItemRecords, auditRecords, answerRecords, questionRecords] = await Promise.all([
     listRecords<any>(TABLES.ACTIONS),
     listRecords<{ ShowroomName: string }>(TABLES.SHOWROOMS),
     listRecords<{ SiteName: string }>(TABLES.SITES),
     listRecords<{ Audit?: string[] }>(TABLES.AUDIT_LINE_ITEMS),
     listRecords<{ AuditType?: string }>(TABLES.AUDITS),
+    listRecords<{ TemplateQuestion?: string[] }>(TABLES.ANSWERS),
+    listRecords<{ Section?: string }>(TABLES.TEMPLATE_QUESTIONS),
   ]);
+
+  // Action -> Answer -> TemplateQuestion -> Section join (same pattern as
+  // hs-review's questionRefFor) so H&S rows can be filtered/grouped by
+  // section (Salli, 9 Sep 2026: "a filter that could help sort through the
+  // issues, for example if I was looking for one that involved fire warden
+  // I could filter it to fire warden issues - whatever way the questions
+  // are sectioned off could be the filters"). POS/Other actions have no
+  // SourceAnswer to trace, so they simply have no section - that's fine,
+  // the filter only ever lists sections that actually occur.
+  const answerByIdForSection = new Map(answerRecords.map((a) => [a.id, a.fields]));
+  const sectionByQuestionId = new Map(questionRecords.map((q) => [q.id, q.fields.Section || ""]));
+  function sectionFor(a: any): string | null {
+    const answerId = a.fields.SourceAnswer?.[0];
+    const questionId = answerId ? answerByIdForSection.get(answerId)?.TemplateQuestion?.[0] : undefined;
+    const section = questionId ? sectionByQuestionId.get(questionId) : undefined;
+    return section || null;
+  }
 
   const showroomNameById: Record<string, string> = {};
   showroomRecords.forEach((s) => (showroomNameById[s.id] = s.fields.ShowroomName));
@@ -105,6 +124,7 @@ export default async function ActionsPage() {
       locationName,
       auditType,
       hsKind: source === "H&S" ? hsFoundViaKind(a) : undefined,
+      section: sectionFor(a),
     };
   }
 

@@ -8,7 +8,7 @@
 
 import { listRecords, createRecords, uploadAttachment, TABLES, type AttachmentUpload } from "./airtable";
 import { sendEmail, emailShell, BRAND } from "./resend";
-import { formatFlaggedIssue, formatFreeTextIssue, formatRosterIssue } from "./hsActionLabels";
+import { formatFlaggedIssue, formatFreeTextIssue, formatRosterIssue, formatUncertainIssue } from "./hsActionLabels";
 
 export type AnswerType =
   | "Short answer"
@@ -272,6 +272,36 @@ function isBlankOrNA(text: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// Uncertain free-text answers (Zara, 9 Sep 2026: "What determines if it
+// flags as an issue or not - some questions with the text box option, how
+// do we know if it's an issue. For example, a question that asks where is
+// this poster? And an employee writes I don't know. Would that just be
+// missed then?" - Salli: "good point - most things are obvious but I guess
+// we are relying on AI to understand what an issue actually is!").
+//
+// There's no AI call here reading for meaning - that would need judging
+// content it's never seen before, which is a bigger, riskier change than
+// this feedback round. What this DOES catch is the specific shape of a
+// non-answer: "I don't know", "not sure", "unsure", "no idea" etc, on any
+// free-text question that isn't already covered. Applies to every Short/
+// Long answer question EXCEPT the ones in ISSUE_FIELD_QUESTION_NUMBERS -
+// those already raise an action for ANY non-blank/non-n/a text, so "I don't
+// know" typed into one of those boxes is already caught, just as itself
+// rather than as a special "uncertain" case. This is squarely the "Where is
+// the Fire Log Book kept?" (Q32) / "Who is the Fire Warden?" (Q31) shape of
+// question Zara described - answers to those currently only surface on the
+// H&S Review page for someone to notice by eye; this also raises a
+// Low-priority follow-up action so it can't quietly scroll past.
+const UNCERTAIN_ANSWER_PATTERN =
+  /^(i\s+)?(don'?t|do\s+not)\s+know\b|^not\s+sure\b|^unsure\b|^no\s+idea\b|^(un)?known\??$|^idk$|^dunno$|^not\s+known\b|^no\s+one\s+knows\b|^no\s+idea\s+sorry\b|^\?+$/i;
+
+function isUncertainAnswer(text: string): boolean {
+  const t = text.trim();
+  if (!t || isBlankOrNA(t)) return false;
+  return UNCERTAIN_ANSWER_PATTERN.test(t);
+}
+
+// ---------------------------------------------------------------------------
 // Broader "some things aren't picking up issues" fix (Salli, via Lorraine,
 // 2 Sep 2026 - she gave Q16/Q24 as examples but the underlying gap is
 // general: several Single choice questions have an obvious "bad"/request
@@ -503,6 +533,30 @@ export async function submitHSWalkaround(input: SubmissionInput) {
       });
     }
 
+    // "I don't know"/"not sure"-shaped answer on any OTHER free-text
+    // question (Zara, 9 Sep 2026 - see isUncertainAnswer above). Skips
+    // ISSUE_FIELD_QUESTION_NUMBERS questions since those already raised an
+    // action just above for any non-blank text, uncertain or not.
+    if (
+      q.qnum &&
+      !ISSUE_FIELD_QUESTION_NUMBERS.has(q.qnum) &&
+      (q.answerType === "Short answer" || q.answerType === "Long answer") &&
+      isUncertainAnswer(a.value)
+    ) {
+      actionsToCreate.push({
+        Name: `${site.name} - Q${q.qnum} unclear answer`,
+        Status: "Open",
+        Site: [site.id],
+        SourceAnswer: [answerRecord.id],
+        IssueDescription: formatUncertainIssue(q.qnum, q.section, a.value),
+        Priority: "Low",
+        OwnerName: input.submittedByName,
+        OwnerEmail: input.submittedByEmail,
+        DateIdentified: today,
+        UrgencyClass: "Digest",
+      });
+    }
+
     // Broader "bad option picked but never flagged" fix - see
     // SINGLE_CHOICE_FLAG_VALUES above.
     if (q.qnum && SINGLE_CHOICE_FLAG_VALUES[q.qnum]?.includes(a.value)) {
@@ -561,13 +615,20 @@ export async function submitHSWalkaround(input: SubmissionInput) {
     }
 
     // Q63/65: training request / risk assessment request - anything other than the "none needed" option.
-    if (q.qnum === 63 && a.value) {
+    // "Not required" added 9 Sep 2026 (Salli) - must be excluded here the
+    // same way Q65 already excludes its own "Not Required" option, or every
+    // submission would raise a spurious training request.
+    if (q.qnum === 63 && a.value && a.value !== "Not required") {
+      // Fold in Q64's "who is it for" detail, same pattern as Q23/Q24's
+      // quantity fold-in - one traceable action instead of two disconnected
+      // fields.
+      const who = answerByQnum.get(64)?.value;
       actionsToCreate.push({
         Name: `${site.name} - training request`,
         Status: "Open",
         Site: [site.id],
         SourceAnswer: [answerRecord.id],
-        IssueDescription: `(Q${q.qnum}) Training requested: ${a.value}`,
+        IssueDescription: `(Q${q.qnum}) Training requested: ${a.value}${who ? ` - for: ${who}` : ""}`,
         Priority: "Low",
         OwnerName: input.submittedByName,
         OwnerEmail: input.submittedByEmail,

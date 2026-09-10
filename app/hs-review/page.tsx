@@ -5,6 +5,9 @@ import { listRecords, TABLES } from "@/lib/airtable";
 import { Card, KpiCard } from "@/components/ui";
 import DownloadLogPdfButton from "@/components/DownloadLogPdfButton";
 import DownloadStorePdfButton from "@/components/DownloadStorePdfButton";
+import HSOpenActionsTable, { HSOpenActionRow } from "@/components/HSOpenActionsTable";
+import HSReviewTabs from "@/components/HSReviewTabs";
+import ShowroomScoresPanel from "@/components/ShowroomScoresPanel";
 
 export const dynamic = "force-dynamic";
 
@@ -38,6 +41,7 @@ export default async function HSReviewPage({
       IssueDescription?: string;
       Priority?: string;
       DateIdentified?: string;
+      UrgencyClass?: string;
     }>(TABLES.ACTIONS),
     listRecords<{
       TemplateQuestion?: string[];
@@ -56,6 +60,12 @@ export default async function HSReviewPage({
   const hsActions = actions.filter((a) => (a.fields.SourceAnswer || []).some((aid) => hsAnswerIds.has(aid)));
 
   const siteName = (id?: string) => sites.find((s) => s.id === id)?.fields.SiteName || "-";
+  // "2026-09" -> "September 2026", for the KPI card's sub-label.
+  const monthLabel = (ym: string) => {
+    const [y, m] = ym.split("-").map(Number);
+    if (!y || !m) return ym;
+    return new Date(y, m - 1, 1).toLocaleDateString("en-GB", { month: "long", year: "numeric" });
+  };
 
   // Action -> Answer -> TemplateQuestion join, so the Open Follow-up Actions
   // table can show which question an issue came from even when the text
@@ -72,6 +82,17 @@ export default async function HSReviewPage({
     const question = questionId ? questionById.get(questionId) : undefined;
     if (!question) return null;
     return question.QuestionNumber ? `Q${question.QuestionNumber}` : question.QuestionText ? question.QuestionText.slice(0, 40) : null;
+  };
+  // Same join, just the Section instead of the question number/text - powers
+  // the Section filter on the Open follow-up actions table below (Salli, 9
+  // Sep 2026: "whatever way the questions are sectioned off could be the
+  // filters").
+  const sectionRefFor = (action: (typeof hsActions)[number]): string | null => {
+    const answerId = action.fields.SourceAnswer?.[0];
+    const answer = answerId ? answerById.get(answerId) : undefined;
+    const questionId = answer?.fields.TemplateQuestion?.[0];
+    const question = questionId ? questionById.get(questionId) : undefined;
+    return question?.Section || null;
   };
 
   const openHsActions = hsActions.filter((a) => a.fields.Status === "Open" || a.fields.Status === "In progress");
@@ -153,15 +174,26 @@ export default async function HSReviewPage({
     });
   }
 
-  return (
-    <div>
-      <h1 style={{ fontSize: 24, marginBottom: 4 }}>H&S Review</h1>
+  const reviewContent = (
+    <>
       <p style={{ color: "#6E6E6E", marginTop: 0, marginBottom: 24 }}>
         {hsSubmissions.length} H&S check{hsSubmissions.length === 1 ? "" : "s"} submitted so far.
       </p>
 
       <div style={{ display: "flex", gap: 16, marginBottom: 24, flexWrap: "wrap" }}>
-        <KpiCard label="H&S checks submitted" value={hsSubmissions.length} />
+        {/* Zara, 9 Sep 2026: "is that 'this month' or is that total in all
+            time? It would be useful if it can be filtered per month? So Zara
+            can give the exact amount of submissions that month." - this
+            previously always showed the all-time total regardless of the
+            Site/Month filter below (which only ever touched the Submissions
+            Log table). Now it tracks the same filter, with a sub-label
+            spelling out exactly what's being counted so there's no more
+            ambiguity either way. */}
+        <KpiCard
+          label="H&S checks submitted"
+          value={filteredSubmissions.length}
+          sub={selectedSiteId || selectedMonth ? `${selectedMonth ? monthLabel(selectedMonth) : "all time"}${selectedSiteId ? ` · ${siteName(selectedSiteId)}` : ""}` : "all time - use the filter below for a specific month"}
+        />
         <KpiCard label="Open follow-up actions" value={openHsActions.length} />
         <KpiCard label="Roster/poster mismatches open" value={rosterMismatches.length} />
       </div>
@@ -231,34 +263,41 @@ export default async function HSReviewPage({
       <div style={{ height: 20 }} />
 
       <Card title={`Open follow-up actions (${openHsActions.length})`}>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
-          <thead>
-            <tr style={{ textAlign: "left", color: "#6E6E6E", borderBottom: "1px solid #eee" }}>
-              <th style={{ padding: "6px 4px" }}>Site</th>
-              <th>Question</th>
-              <th>Issue</th>
-              <th>Priority</th>
-              <th>Identified</th>
-              <th>Type</th>
-            </tr>
-          </thead>
-          <tbody>
-            {openHsActions.map((a) => (
-              <tr key={a.id} style={{ borderBottom: "1px solid #f2f2f2" }}>
-                <td style={{ padding: "8px 4px" }}>{siteName(a.fields.Site?.[0])}</td>
-                <td style={{ color: "#6E6E6E", whiteSpace: "nowrap" }}>{questionRefFor(a) || "-"}</td>
-                <td>{a.fields.IssueDescription}</td>
-                <td>{a.fields.Priority}</td>
-                <td>{a.fields.DateIdentified}</td>
-                <td>{(a.fields.RosterMismatch || []).length > 0 ? "Roster/poster" : "Reported issue"}</td>
-              </tr>
-            ))}
-            {openHsActions.length === 0 && (
-              <tr><td colSpan={6} style={{ padding: "16px 4px", color: "#999" }}>Nothing open.</td></tr>
-            )}
-          </tbody>
-        </table>
+        <HSOpenActionsTable
+          rows={openHsActions.map(
+            (a): HSOpenActionRow => ({
+              id: a.id,
+              site: siteName(a.fields.Site?.[0]),
+              questionRef: questionRefFor(a) || "",
+              section: sectionRefFor(a),
+              issue: a.fields.IssueDescription || "",
+              priority: a.fields.Priority || "",
+              identified: a.fields.DateIdentified || "",
+              typeLabel: (a.fields.RosterMismatch || []).length > 0 ? "Roster/poster" : "Reported issue",
+            })
+          )}
+        />
       </Card>
+    </>
+  );
+
+  const scoresContent = (
+    <ShowroomScoresPanel
+      sites={hsSiteOptions.map((s) => ({ id: s.id, name: s.fields.SiteName }))}
+      submissions={hsSubmissions.map((s) => ({ siteId: s.fields.Site?.[0] || "", date: s.fields.SubmissionDate || "" }))}
+      actions={hsActions.map((a) => ({
+        siteId: a.fields.Site?.[0] || "",
+        dateIdentified: a.fields.DateIdentified || "",
+        status: a.fields.Status || "",
+        urgencyClass: a.fields.UrgencyClass,
+      }))}
+    />
+  );
+
+  return (
+    <div>
+      <h1 style={{ fontSize: 24, marginBottom: 4 }}>H&S Review</h1>
+      <HSReviewTabs reviewContent={reviewContent} scoresContent={scoresContent} />
     </div>
   );
 }

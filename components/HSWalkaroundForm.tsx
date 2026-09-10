@@ -59,6 +59,32 @@ const CONDITIONAL_QUESTIONS: Record<number, { dependsOnQnum: number; showWhen: (
   // and 43 seem to ask the same question. Q43 shouldn't appear if 42 is
   // answered NO").
   43: { dependsOnQnum: 42, showWhen: (a) => a === "Yes" },
+  // Q15 "Report issue here" - same shape as Q16/Q17, just never wired up
+  // (Salli, via Lorraine, 9 Sep 2026: "Q14 & Q15 - Same as above, Q15
+  // 'reporting an issue' only needs to appear if someone clicks No. Then
+  // Q15 should be mandatory to complete.").
+  15: { dependsOnQnum: 14, showWhen: (a) => a === "No" },
+  // Q26 "Report issue here" - moved to sit directly under Q22 in Airtable's
+  // OrderIndex (was at the end of the section) and now only shown when Q22
+  // is answered "Report a different issue" (Salli, 9 Sep 2026: "When you
+  // click report a different issue can a box appear to write down the
+  // issue? I think Q26 is for you to write down your issue so it could
+  // even be moved up under Q22 or just appear if its needed" - agreed Q26
+  // can otherwise disappear). The "unsecured furniture" option on Q22
+  // already tells the respondent what to do (put up signage) so doesn't
+  // need a text box of its own.
+  26: { dependsOnQnum: 22, showWhen: (a) => a === "Report a different issue" },
+  // Q34 "Do you require any update to the fire extinguishers after use?"
+  // only makes sense if Q33 says there's actually been a fire/incident/
+  // extinguisher use to report on (Salli, 9 Sep 2026: "Q34 only needs to
+  // appear if you answer yes for Q33").
+  34: { dependsOnQnum: 33, showWhen: (a) => a === "Yes, and it is logged in the log book" },
+  // Q64 "Who is the training for?" hides entirely once the new "Not
+  // required" option is picked on Q63 (Salli, 9 Sep 2026: "We have added a
+  // Not required option - so if that's clicked - can Q64 become
+  // invisible?"). Also hidden if Q63 hasn't been answered at all yet, since
+  // Q63 itself is optional.
+  64: { dependsOnQnum: 63, showWhen: (a) => !!a && a !== "Not required" },
 };
 
 // Matrix questions (Fire Warden Duties, Warehouse material handling) each

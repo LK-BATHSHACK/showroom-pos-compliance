@@ -66,3 +66,12 @@ export function formatFreeTextIssue(qnum: number, rawValue: string): string {
 export function formatRosterIssue(qnum: number, note: string): string {
   return `(Q${qnum}) ${note}`;
 }
+
+// For an "I don't know"/"not sure"-shaped answer to a free-text question
+// that isn't already an unconditional issue box (Zara, 9 Sep 2026 - see
+// isUncertainAnswer in hsSubmission.ts). Includes the question's own
+// section so it's traceable the same way formatFreeTextIssue's actions are,
+// and echoes exactly what was typed rather than paraphrasing it.
+export function formatUncertainIssue(qnum: number, section: string, rawValue: string): string {
+  return `(Q${qnum}${section ? ` - ${section}` : ""}) Answer unclear - needs following up: "${rawValue}"`;
+}

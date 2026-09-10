@@ -11,9 +11,15 @@ type Row = {
   locationName: string;
   auditType?: string;
   hsKind?: "roster" | "issue" | "training" | "risk";
+  // Which section of the checklist this came from (e.g. "Fire Warden
+  // Checklist") - null for POS/Other actions, which have no source question
+  // to trace back to. See app/actions/page.tsx's sectionFor().
+  section?: string | null;
 };
 
 type Tab = "All" | "POS" | "H&S";
+
+type SortBy = "Priority" | "Site" | "Date identified";
 
 // Split requested 31 Aug 2026 (Lorraine: "different people manage those and
 // the actions of them") - one page, filter tabs, rather than two separate
@@ -42,6 +48,12 @@ export default function ActionsTabs({
   const [site, setSite] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  // Section + Sort-by (Salli/Zara, 9 Sep 2026: "a filter/sort option...
+  // showroom by showroom" and "a filter... if I was looking for one that
+  // involved fire warden"). Sort defaults to Priority to match the order
+  // the rows already arrive in from the server.
+  const [section, setSection] = useState("");
+  const [sortBy, setSortBy] = useState<SortBy>("Priority");
 
   // Lifted into local state (rather than reading `rows`/`resolvedRows`
   // props directly) so a resolve saved via the new Resolution area (8 Sep
@@ -92,17 +104,38 @@ export default function ActionsTabs({
     [openRows, resolvedList]
   );
 
+  const sections = useMemo(
+    () =>
+      Array.from(new Set([...openRows, ...resolvedList].map((r) => r.section).filter((s): s is string => !!s))).sort(),
+    [openRows, resolvedList]
+  );
+
   const visible = useMemo(() => {
     const base = showResolved ? [...openRows, ...resolvedList] : openRows;
     const byTab = tab === "All" ? base : base.filter((r) => r.source === tab);
-    return byTab.filter((r) => {
+    const filtered = byTab.filter((r) => {
       if (site && r.locationName !== site) return false;
+      if (section && r.section !== section) return false;
       const identified: string = r.action.fields.DateIdentified || "";
       if (dateFrom && identified < dateFrom) return false;
       if (dateTo && identified > dateTo) return false;
       return true;
     });
-  }, [openRows, resolvedList, showResolved, tab, site, dateFrom, dateTo]);
+    // Sort-by (Zara, 9 Sep 2026: "even if they can come through in order the
+    // forms come through... I expect all the ones I just completed to be
+    // together at the bottom of the list but they were just mixed
+    // throughout") - Priority keeps the server's original order (already
+    // Priority-then-Target-date); Site and Date identified are re-sorted
+    // here, showroom-by-showroom or oldest/most-recently-reported first.
+    if (sortBy === "Priority") return filtered;
+    const sorted = [...filtered];
+    if (sortBy === "Site") {
+      sorted.sort((a, b) => a.locationName.localeCompare(b.locationName));
+    } else if (sortBy === "Date identified") {
+      sorted.sort((a, b) => (a.action.fields.DateIdentified || "").localeCompare(b.action.fields.DateIdentified || ""));
+    }
+    return sorted;
+  }, [openRows, resolvedList, showResolved, tab, site, section, dateFrom, dateTo, sortBy]);
 
   const inputStyle: React.CSSProperties = {
     padding: "6px 8px",
@@ -131,6 +164,16 @@ export default function ActionsTabs({
             </option>
           ))}
         </select>
+        {sections.length > 0 && (
+          <select value={section} onChange={(e) => setSection(e.target.value)} style={inputStyle}>
+            <option value="">All sections</option>
+            {sections.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
+        )}
         <label style={{ fontSize: 13, color: "#6E6E6E", display: "flex", gap: 6, alignItems: "center" }}>
           From
           <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} style={inputStyle} />
@@ -139,13 +182,23 @@ export default function ActionsTabs({
           To
           <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} style={inputStyle} />
         </label>
-        {(site || dateFrom || dateTo) && (
+        <label style={{ fontSize: 13, color: "#6E6E6E", display: "flex", gap: 6, alignItems: "center" }}>
+          Sort by
+          <select value={sortBy} onChange={(e) => setSortBy(e.target.value as SortBy)} style={inputStyle}>
+            <option value="Priority">Priority</option>
+            <option value="Site">Site (showroom by showroom)</option>
+            <option value="Date identified">Date identified</option>
+          </select>
+        </label>
+        {(site || section || dateFrom || dateTo || sortBy !== "Priority") && (
           <button
             type="button"
             onClick={() => {
               setSite("");
+              setSection("");
               setDateFrom("");
               setDateTo("");
+              setSortBy("Priority");
             }}
             style={{ background: "none", border: "none", color: "#E6017E", fontSize: 13, cursor: "pointer", padding: 0 }}
           >

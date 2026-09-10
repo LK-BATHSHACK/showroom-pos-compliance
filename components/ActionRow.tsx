@@ -82,6 +82,11 @@ export default function ActionRow({
               <button
                 disabled={busy}
                 onClick={() => updateStatus("In progress")}
+                // Salli, 9 Sep 2026: "I'm not sure what the 'start' button is
+                // for? is that for us to know 'its' being looked into?" -
+                // yes, exactly that; the button itself stays short (it's a
+                // table cell) but a hover tooltip spells out what it does.
+                title="Marks this as In progress, so everyone can see it's being looked into (doesn't resolve it - tick Resolved for that once it's actually fixed)."
                 style={{ background: "#fab219", color: "#fff", border: "none", borderRadius: 4, padding: "4px 10px", fontSize: 12, cursor: "pointer" }}
               >
                 Start
@@ -104,6 +109,18 @@ export default function ActionRow({
               </span>
             )}
           </div>
+          {/* Salli, 9 Sep 2026: "When you click the SHOW RESOLVED filter, it
+              doesn't show 'how it was resolved' so that information is gone -
+              can it be shown?" - the notes typed into the Resolution area
+              above were being saved (Round 8) but never displayed anywhere
+              once a row moved to Resolved. Shown for any resolved action that
+              has notes, not just H&S, since the field/flow is shared. */}
+          {status === "Resolved" && action.fields.ResolutionNotes && (
+            <div style={{ fontSize: 12, color: "#333", background: "#F5F5F5", borderRadius: 4, padding: "6px 8px", maxWidth: 260 }}>
+              <span style={{ color: "#6E6E6E" }}>How it was resolved: </span>
+              {action.fields.ResolutionNotes}
+            </div>
+          )}
           {/* Resolution area - appears once "Resolved" is ticked. Untick to
               cancel (no PATCH sent, nothing saved). */}
           {resolving && (
