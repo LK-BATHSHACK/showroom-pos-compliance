@@ -43,6 +43,7 @@ export async function POST(req: NextRequest) {
       notes,
       lines: cleanLines.map((l) => ({ itemId: l.itemId, quantity: Number(l.quantity), notes: l.notes })),
       itemNameById,
+      appHost: req.headers.get("host") || undefined,
     });
 
     return NextResponse.json({ success: true, id });

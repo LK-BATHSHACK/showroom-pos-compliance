@@ -27,7 +27,7 @@
 // cleanly - it doesn't invent new categories.
 
 import { listRecords, createRecords, updateRecords, TABLES } from "./airtable";
-import { sendEmail, emailShell } from "./resend";
+import { sendEmail, emailShell, BRAND } from "./resend";
 
 export const CONSUMABLE_CATEGORIES = [
   "Toilet & Washroom",
@@ -151,6 +151,11 @@ export async function createConsumablesRequest(input: {
   notes?: string;
   lines: NewConsumablesRequestLine[];
   itemNameById: Map<string, string>;
+  // Host the request came in on (from the API route's req.headers.get("host")),
+  // used to build a "review this" link in Chris's email - same appHost pattern
+  // lib/hsSubmission.ts's sendSubmissionSummaryEmail already uses. Optional so
+  // this still works (just without the link) if a caller doesn't have one.
+  appHost?: string;
 }): Promise<string> {
   const today = new Date().toISOString().slice(0, 10);
 
@@ -184,6 +189,14 @@ export async function createConsumablesRequest(input: {
   const itemListHtml = input.lines
     .map((l) => `<li>${input.itemNameById.get(l.itemId) || "Item"} &times; ${l.quantity}${l.notes ? ` - <em>${l.notes}</em>` : ""}</li>`)
     .join("");
+  // No per-request detail page exists (yet) - Consumables Requests are all
+  // reviewed together on the Dashboard tab, newest first, so linking there
+  // lands Chris directly on this request at the top rather than leaving him
+  // to find the app himself. Same appHost -> https://<host>/... link pattern
+  // lib/hsSubmission.ts's submission-summary email already uses.
+  const reviewLink = input.appHost
+    ? `<p style="margin-top:20px;"><a href="https://${input.appHost}/consumables" style="color:${BRAND.pink};">Review this request</a></p>`
+    : "";
   await sendEmail(
     notifyEmail,
     `New consumables request: ${input.siteName}`,
@@ -195,7 +208,7 @@ export async function createConsumablesRequest(input: {
        <p><strong>Items:</strong></p>
        <ul>${itemListHtml}</ul>
        ${input.notes ? `<p><strong>Note from the site:</strong> ${input.notes}</p>` : ""}
-       <p>Review and update its status in the app's Consumables tab.</p>`
+       ${reviewLink}`
     )
   );
 
