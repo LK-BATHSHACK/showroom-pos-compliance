@@ -42,8 +42,8 @@ export default async function UploadPage() {
   // makes sence for a showroom reading it").
   const introCopy =
     session.role === "Store Manager"
-      ? "Complete your showroom's monthly POS check below - it takes about 10 minutes and covers everything from window POS to till-point signage."
-      : "Fill out a POS check directly below by the 27th of each month. A delay in uploading will bring down your compliance score and will trigger your regional manager to review with you.";
+      ? "Complete your showroom's monthly POS check below by the 28th of each month - it takes about 10 minutes and covers everything from window POS to till-point signage."
+      : "Fill out a POS check directly below by the 28th of each month. A delay in uploading will bring down your compliance score and will trigger your regional manager to review with you.";
 
   return (
     <div>
