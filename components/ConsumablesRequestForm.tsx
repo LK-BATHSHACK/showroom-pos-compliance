@@ -6,9 +6,11 @@ import { Card } from "@/components/ui";
 
 type SiteOption = { id: string; name: string };
 type CatalogItem = { id: string; name: string; category: string | null; unit: string | null };
-type Line = { itemId: string; quantity: string; notes: string };
+// Quantity removed for now (Lorraine, 23 Sep 2026) - every item is 1, and
+// each item can only be picked once per request.
+type Line = { itemId: string; notes: string };
 
-const EMPTY_LINE: Line = { itemId: "", quantity: "1", notes: "" };
+const EMPTY_LINE: Line = { itemId: "", notes: "" };
 
 export default function ConsumablesRequestForm({
   sites,
@@ -41,13 +43,13 @@ export default function ConsumablesRequestForm({
     e.preventDefault();
     setError("");
     setSuccess(false);
-    const cleanLines = lines.filter((l) => l.itemId && Number(l.quantity) > 0);
+    const cleanLines = lines.filter((l) => l.itemId);
     if (!siteId) {
       setError("Pick a site.");
       return;
     }
     if (cleanLines.length === 0) {
-      setError("Add at least one item with a quantity.");
+      setError("Add at least one item.");
       return;
     }
     setSubmitting(true);
@@ -57,7 +59,7 @@ export default function ConsumablesRequestForm({
       body: JSON.stringify({
         siteId,
         notes,
-        lines: cleanLines.map((l) => ({ itemId: l.itemId, quantity: Number(l.quantity), notes: l.notes })),
+        lines: cleanLines.map((l) => ({ itemId: l.itemId, quantity: 1, notes: l.notes })),
       }),
     });
     setSubmitting(false);
@@ -103,7 +105,8 @@ export default function ConsumablesRequestForm({
         <label style={labelStyle}>Items</label>
         <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 10 }}>
           {lines.map((line, i) => {
-            const item = catalog.find((c) => c.id === line.itemId);
+            // Hide items already picked on another line, so nothing can be ordered twice.
+            const takenElsewhere = new Set(lines.filter((_, idx) => idx !== i).map((l) => l.itemId).filter(Boolean));
             return (
               <div key={i} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                 <select
@@ -112,21 +115,14 @@ export default function ConsumablesRequestForm({
                   onChange={(e) => updateLine(i, { itemId: e.target.value })}
                 >
                   <option value="">Select an item...</option>
-                  {catalog.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.category ? `${c.category} - ${c.name}` : c.name}
-                    </option>
-                  ))}
+                  {catalog
+                    .filter((c) => !takenElsewhere.has(c.id))
+                    .map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.category ? `${c.category} - ${c.name}` : c.name}
+                      </option>
+                    ))}
                 </select>
-                <input
-                  type="number"
-                  min={1}
-                  style={{ ...inputStyle, flex: "0 1 90px" }}
-                  value={line.quantity}
-                  onChange={(e) => updateLine(i, { quantity: e.target.value })}
-                  placeholder="Qty"
-                />
-                <span style={{ fontSize: 12, color: "#999", minWidth: 40 }}>{item?.unit || ""}</span>
                 <input
                   style={{ ...inputStyle, flex: "1 1 160px" }}
                   value={line.notes}
@@ -146,6 +142,7 @@ export default function ConsumablesRequestForm({
             );
           })}
         </div>
+        {lines.length < catalog.length && (
         <button
           type="button"
           onClick={addLine}
@@ -153,6 +150,7 @@ export default function ConsumablesRequestForm({
         >
           + Add another item
         </button>
+        )}
 
         <label style={labelStyle}>Anything else Chris should know? (optional)</label>
         <textarea

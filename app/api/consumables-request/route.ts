@@ -21,9 +21,16 @@ export async function POST(req: NextRequest) {
     if (!resolvedSiteId) {
       return NextResponse.json({ error: "Site is required." }, { status: 400 });
     }
-    const cleanLines = (lines || []).filter((l) => l.itemId && Number(l.quantity) > 0);
+    // Quantity is fixed at 1 for now (Lorraine, 23 Sep 2026: "We would like
+    // the quantity option removed for now so they can't order more than 1 qty
+    // of something") - enforced here too, not just by hiding the field, and
+    // each item can only appear once per request.
+    const seen = new Set<string>();
+    const cleanLines = (lines || [])
+      .filter((l) => l.itemId && !seen.has(l.itemId) && seen.add(l.itemId))
+      .map((l) => ({ ...l, quantity: 1 }));
     if (cleanLines.length === 0) {
-      return NextResponse.json({ error: "Add at least one item with a quantity." }, { status: 400 });
+      return NextResponse.json({ error: "Add at least one item." }, { status: 400 });
     }
 
     const [sites, items] = await Promise.all([

@@ -236,3 +236,23 @@ export async function createConsumableItem(input: { name: string; category: stri
     active: true,
   };
 }
+
+/**
+ * Edits an existing catalog item (Admin, via the Dashboard's Edit/Remove
+ * controls - Lorraine, 23 Sep 2026: "how do we delete or edit existing
+ * options?"). "Remove" sets Active = false rather than deleting the record,
+ * so past requests that include the item keep their item name and still show
+ * in the Dashboard's history/patterns - it just stops appearing on the
+ * request form.
+ */
+export async function updateConsumableItem(
+  id: string,
+  patch: { name?: string; category?: string; unit?: string; active?: boolean }
+): Promise<void> {
+  const fields: Record<string, any> = {};
+  if (patch.name !== undefined) fields.Name = patch.name.trim();
+  if (patch.category !== undefined) fields.Category = patch.category;
+  if (patch.unit !== undefined) fields.Unit = patch.unit.trim();
+  if (patch.active !== undefined) fields.Active = patch.active;
+  await updateRecords(TABLES.CONSUMABLE_ITEMS, [{ id, fields }]);
+}

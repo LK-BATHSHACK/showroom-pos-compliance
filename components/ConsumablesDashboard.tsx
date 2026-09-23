@@ -143,6 +143,57 @@ export default function ConsumablesDashboard({
     }
   }
 
+  // Edit / Remove existing catalog items (Lorraine, 23 Sep 2026: "how do we
+  // delete or edit existing options?") - Admin only. Remove is a soft remove
+  // (Active off), so past requests keep their history.
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editCategory, setEditCategory] = useState(CATEGORIES[0]);
+  const [editUnit, setEditUnit] = useState("");
+  const [catalogBusyId, setCatalogBusyId] = useState<string | null>(null);
+  const [catalogError, setCatalogError] = useState("");
+
+  function startEdit(c: CatalogItem) {
+    setEditingId(c.id);
+    setEditName(c.name);
+    setEditCategory(c.category || CATEGORIES[0]);
+    setEditUnit(c.unit || "");
+    setCatalogError("");
+  }
+
+  async function patchItem(id: string, patch: Record<string, unknown>): Promise<boolean> {
+    setCatalogBusyId(id);
+    setCatalogError("");
+    const res = await fetch("/api/consumable-items", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, ...patch }),
+    });
+    const body = await res.json().catch(() => ({}));
+    setCatalogBusyId(null);
+    if (!res.ok) {
+      setCatalogError(body.error || "Couldn't save that change - try again.");
+      return false;
+    }
+    router.refresh();
+    return true;
+  }
+
+  async function saveEdit() {
+    if (!editingId) return;
+    if (!editName.trim()) {
+      setCatalogError("Give the item a name.");
+      return;
+    }
+    const ok = await patchItem(editingId, { name: editName.trim(), category: editCategory, unit: editUnit.trim() });
+    if (ok) setEditingId(null);
+  }
+
+  async function removeItem(c: CatalogItem) {
+    if (!window.confirm(`Remove "${c.name}" from the request form? Past requests for it will still show in the dashboard.`)) return;
+    await patchItem(c.id, { active: false });
+  }
+
   const selectStyle: React.CSSProperties = { padding: "6px 8px", border: "1px solid #ccc", borderRadius: 6, fontSize: 13 };
 
   return (
@@ -152,15 +203,85 @@ export default function ConsumablesDashboard({
           added straight from here without needing Airtable access. */}
       {canManageCatalog && (
         <Card title="Consumables catalog">
-          <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 18px", marginBottom: 12, fontSize: 13, color: "#333" }}>
-            {catalog.map((c) => (
-              <span key={c.id}>
-                {c.name}
-                {c.unit ? <span style={{ color: "#999" }}> ({c.unit})</span> : null}
-              </span>
-            ))}
-            {catalog.length === 0 && <span style={{ color: "#999" }}>No items in the catalog yet.</span>}
-          </div>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, marginBottom: 12 }}>
+            <thead>
+              <tr style={{ textAlign: "left", color: "#6E6E6E", borderBottom: "1px solid #eee" }}>
+                <th style={{ padding: "6px 4px" }}>Item</th>
+                <th style={{ padding: "6px 4px" }}>Category</th>
+                <th style={{ padding: "6px 4px" }}>Unit</th>
+                <th style={{ padding: "6px 4px" }}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {catalog.map((c) =>
+                editingId === c.id ? (
+                  <tr key={c.id} style={{ borderBottom: "1px solid #f3f3f3" }}>
+                    <td style={{ padding: "6px 4px" }}>
+                      <input value={editName} onChange={(e) => setEditName(e.target.value)} style={{ ...selectStyle, width: "100%" }} />
+                    </td>
+                    <td style={{ padding: "6px 4px" }}>
+                      <select value={editCategory} onChange={(e) => setEditCategory(e.target.value)} style={selectStyle}>
+                        {CATEGORIES.map((cat) => (
+                          <option key={cat} value={cat}>
+                            {cat}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td style={{ padding: "6px 4px" }}>
+                      <input value={editUnit} onChange={(e) => setEditUnit(e.target.value)} placeholder="optional" style={{ ...selectStyle, width: 110 }} />
+                    </td>
+                    <td style={{ padding: "6px 4px", whiteSpace: "nowrap", textAlign: "right" }}>
+                      <button
+                        disabled={catalogBusyId === c.id}
+                        onClick={saveEdit}
+                        style={{ background: "#0ca30c", color: "#fff", border: "none", borderRadius: 6, padding: "4px 12px", fontSize: 12, cursor: "pointer", marginRight: 6 }}
+                      >
+                        Save
+                      </button>
+                      <button
+                        disabled={catalogBusyId === c.id}
+                        onClick={() => setEditingId(null)}
+                        style={{ background: "none", border: "1px solid #ccc", borderRadius: 6, padding: "4px 12px", fontSize: 12, cursor: "pointer" }}
+                      >
+                        Cancel
+                      </button>
+                    </td>
+                  </tr>
+                ) : (
+                  <tr key={c.id} style={{ borderBottom: "1px solid #f3f3f3" }}>
+                    <td style={{ padding: "6px 4px" }}>{c.name}</td>
+                    <td style={{ padding: "6px 4px", color: "#6E6E6E" }}>{c.category || "-"}</td>
+                    <td style={{ padding: "6px 4px", color: "#6E6E6E" }}>{c.unit || "-"}</td>
+                    <td style={{ padding: "6px 4px", whiteSpace: "nowrap", textAlign: "right" }}>
+                      <button
+                        disabled={catalogBusyId === c.id}
+                        onClick={() => startEdit(c)}
+                        style={{ background: "none", border: "1px solid #ccc", borderRadius: 6, padding: "4px 12px", fontSize: 12, cursor: "pointer", marginRight: 6 }}
+                      >
+                        Edit
+                      </button>
+                      <button
+                        disabled={catalogBusyId === c.id}
+                        onClick={() => removeItem(c)}
+                        style={{ background: "none", border: "1px solid #d03b3b", color: "#d03b3b", borderRadius: 6, padding: "4px 12px", fontSize: 12, cursor: "pointer" }}
+                      >
+                        {catalogBusyId === c.id ? "..." : "Remove"}
+                      </button>
+                    </td>
+                  </tr>
+                )
+              )}
+              {catalog.length === 0 && (
+                <tr>
+                  <td colSpan={4} style={{ padding: "6px 4px", color: "#999" }}>
+                    No items in the catalog yet.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+          {catalogError && <div style={{ color: "#d03b3b", fontSize: 12, marginBottom: 10 }}>{catalogError}</div>}
           {!addingItem ? (
             <button
               onClick={() => setAddingItem(true)}
