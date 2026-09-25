@@ -4,6 +4,9 @@
 // overdue one if it goes past 28th and if the reminder email falls on a
 // Sunday make sure it goes a day early so it never falls when they are off").
 //
+// "Submitted" counts by lib/posSchedule.ts periodForAuditDate(): checks dated
+// 1-7 Sep 2026 were the old round and count as August's, not September's.
+//
 // Recipients come straight from Users & Access - every Active user with
 // Role = "Store Manager" and a Site where POSChecklistApplies is ticked - so
 // adding/removing a manager in the app is all it takes, no code change and no
@@ -17,58 +20,26 @@
 
 import { listRecords, TABLES } from "./airtable";
 import { sendEmail, emailShell, BRAND } from "./resend";
+import {
+  POS_MONTHLY_DUE_DAY,
+  SPOT_CHECK_AUDIT_TYPE,
+  dueDateFor,
+  reminderDateFor,
+  overdueDateFor,
+  prevPeriod,
+  periodForAuditDate,
+  POS_SCHEDULE_START,
+} from "./posSchedule";
 
-/** Day of the month the POS check must be submitted by. */
-export const POS_MONTHLY_DUE_DAY = 28;
-/** How many days before the due day the reminder goes out (25th). */
-export const POS_REMINDER_LEAD_DAYS = 3;
-
-const SPOT_CHECK_AUDIT_TYPE = "Physical (Group A)";
-
-// ---- Pure date helpers (all dates are YYYY-MM-DD strings, UK calendar) ----
-
-/** Today's date in Europe/London, as YYYY-MM-DD - so a 7am UTC cron never lands on "yesterday" or "tomorrow". */
-export function londonToday(now: Date = new Date()): string {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/London", year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
-}
-
-function ymd(y: number, m: number, d: number): string {
-  // Date.UTC handles overflow (e.g. 29 Feb in a non-leap year -> 1 Mar).
-  return new Date(Date.UTC(y, m - 1, d)).toISOString().slice(0, 10);
-}
-
-function addDays(date: string, n: number): string {
-  const d = new Date(date + "T00:00:00Z");
-  d.setUTCDate(d.getUTCDate() + n);
-  return d.toISOString().slice(0, 10);
-}
-
-function dayOfWeek(date: string): number {
-  return new Date(date + "T00:00:00Z").getUTCDay(); // 0 = Sunday
-}
-
-/** Reminder date for a period (YYYY-MM): the 25th, moved to Saturday if it's a Sunday. */
-export function reminderDateFor(period: string): string {
-  const [y, m] = period.split("-").map(Number);
-  const d = ymd(y, m, POS_MONTHLY_DUE_DAY - POS_REMINDER_LEAD_DAYS);
-  return dayOfWeek(d) === 0 ? addDays(d, -1) : d;
-}
-
-/** Overdue date for a period: the day after the 28th, moved to Monday if it's a Sunday (it can't go earlier - it isn't overdue yet). */
-export function overdueDateFor(period: string): string {
-  const [y, m] = period.split("-").map(Number);
-  const d = ymd(y, m, POS_MONTHLY_DUE_DAY + 1);
-  return dayOfWeek(d) === 0 ? addDays(d, 1) : d;
-}
-
-function prevPeriod(period: string): string {
-  const [y, m] = period.split("-").map(Number);
-  return ymd(y, m - 1, 1).slice(0, 7);
-}
+// Schedule rules (28th due date, 25th reminder / 18th in December, Sunday
+// shifts, September 2026 start) live in lib/posSchedule.ts so the "Next due"
+// date on the dashboard follows exactly the same rules as these emails.
+export { POS_MONTHLY_DUE_DAY, londonToday, reminderDateFor, overdueDateFor } from "./posSchedule";
 
 /** Which email (if any) goes out today, and for which month's deadline. */
 export function whatIsDueToday(today: string): { kind: "reminder" | "overdue"; period: string } | null {
   const thisPeriod = today.slice(0, 7);
+  if (thisPeriod < POS_SCHEDULE_START.slice(0, 7)) return null;
   if (reminderDateFor(thisPeriod) === today) return { kind: "reminder", period: thisPeriod };
   // The overdue date can spill into the next month (Feb 28 -> 1 Mar, or a
   // Sunday shift), so check last month's deadline as well as this month's.
@@ -113,7 +84,7 @@ async function showroomIdsSubmittedIn(period: string): Promise<Set<string>> {
   const audits = await listRecords<{ Showroom?: string[]; AuditDate?: string; AuditType?: string }>(TABLES.AUDITS);
   return new Set(
     audits
-      .filter((a) => (a.fields.AuditDate || "").startsWith(period) && a.fields.AuditType !== SPOT_CHECK_AUDIT_TYPE)
+      .filter((a) => !!a.fields.AuditDate && periodForAuditDate(a.fields.AuditDate) === period && a.fields.AuditType !== SPOT_CHECK_AUDIT_TYPE)
       .flatMap((a) => a.fields.Showroom || [])
   );
 }
@@ -135,7 +106,7 @@ export async function runPosMonthlyReminders(today: string, appOrigin?: string):
   if (!due) return { kind: null, period: null, sent: [], skippedAlreadySubmitted: [] };
 
   const [targets, submitted] = await Promise.all([fetchStoreManagerTargets(), showroomIdsSubmittedIn(due.period)]);
-  const deadline = ymd(Number(due.period.slice(0, 4)), Number(due.period.slice(5, 7)), POS_MONTHLY_DUE_DAY);
+  const deadline = dueDateFor(due.period);
   const button = appOrigin
     ? `<p style="margin:24px 0;"><a href="${appOrigin}/pos-check" style="background:${BRAND.pink}; color:#fff; padding:12px 20px; text-decoration:none; font-weight:bold; border-radius:4px;">Complete your POS check</a></p>`
     : "";

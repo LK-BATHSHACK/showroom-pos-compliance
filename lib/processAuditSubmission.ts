@@ -2,6 +2,7 @@ import { listRecords, createRecords, updateRecords, AirtableRecord, TABLES } fro
 import { computeAuditScore, ragFromScore, actionPriority, ScoredLineItem, CatalogueInfo, ScoreBreakdown } from "./scoring";
 import { Settings, slaForPriority } from "./settings";
 import { ParsedAudit } from "./parsedAudit";
+import { nextDueAfterSubmission, SPOT_CHECK_AUDIT_TYPE } from "./posSchedule";
 
 function esc(s: string) {
   return s.replace(/"/g, '\\"');
@@ -183,15 +184,18 @@ export async function processAuditSubmission(parsed: ParsedAudit, ctx: SharedCon
   });
   const createdActions = actionsToCreate.length ? await createRecords(TABLES.ACTIONS, actionsToCreate) : [];
 
-  // Uniform monthly cadence for every showroom (14 Aug 2026 process change -
-  // previously 28 days for Group A / 90 for Group B).
-  const cadenceDays = 30;
+  // Next due = the 28th of the following month (Lorraine, 25 Sep 2026: "all
+  // need to be submitted by 28th of every month") - see lib/posSchedule.ts.
+  // Replaces the old "audit date + 30 days", which drifted to dates like the
+  // 2nd or 7th. Jordan's in-person spot checks don't move the store's own due
+  // date, since they don't count as the store's monthly check.
+  const isSpotCheck = (parsed.auditType || "Physical (Group A)") === SPOT_CHECK_AUDIT_TYPE;
   await updateRecords(TABLES.SHOWROOMS, [
     {
       id: showroom.id,
       fields: {
         LastAuditDate: auditDate,
-        NextAuditDue: addDays(auditDate, cadenceDays),
+        ...(isSpotCheck ? {} : { NextAuditDue: nextDueAfterSubmission(auditDate) }),
         ComplianceScore: score.finalScore,
         RAGStatus: rag,
       },

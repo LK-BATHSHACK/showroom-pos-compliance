@@ -43,11 +43,11 @@ function loadImage(file: File): Promise<HTMLImageElement> {
  * if it isn't an image, the browser can't decode it (e.g. HEIC on some
  * Android/Windows browsers), or the "compressed" version would be bigger.
  */
-export async function compressImage(file: File): Promise<File> {
+export async function compressImage(file: File, maxDimension: number = MAX_DIMENSION, quality: number = JPEG_QUALITY): Promise<File> {
   if (!file.type.startsWith("image/") || file.type === "image/gif" || file.type === "image/svg+xml") return file;
   try {
     const img = await loadImage(file);
-    const scale = Math.min(1, MAX_DIMENSION / Math.max(img.naturalWidth, img.naturalHeight));
+    const scale = Math.min(1, maxDimension / Math.max(img.naturalWidth, img.naturalHeight));
     const width = Math.max(1, Math.round(img.naturalWidth * scale));
     const height = Math.max(1, Math.round(img.naturalHeight * scale));
     const canvas = document.createElement("canvas");
@@ -58,7 +58,7 @@ export async function compressImage(file: File): Promise<File> {
     ctx.fillStyle = "#ffffff"; // PNG transparency -> white rather than black in JPEG
     ctx.fillRect(0, 0, width, height);
     ctx.drawImage(img, 0, 0, width, height);
-    const blob: Blob | null = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", JPEG_QUALITY));
+    const blob: Blob | null = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", quality));
     if (!blob || blob.size >= file.size) return file;
     const baseName = (file.name || "photo").replace(/\.[^.]+$/, "");
     return new File([blob], `${baseName}.jpg`, { type: "image/jpeg", lastModified: file.lastModified });
@@ -73,6 +73,41 @@ export async function compressImages(files: File[]): Promise<File[]> {
   // phones out of memory.
   for (const f of files) out.push(await compressImage(f));
   return out;
+}
+
+// Progressively smaller settings, tried in order only if the photos still
+// don't fit under MAX_TOTAL_UPLOAD_BYTES at the default size.
+const FIT_LEVELS: Array<[number, number]> = [
+  [1280, 0.65],
+  [1024, 0.55],
+  [800, 0.5],
+];
+
+function totalSize(groups: Record<string, File[]>): number {
+  return Object.values(groups).reduce((sum, fs) => sum + fs.reduce((a, f) => a + f.size, 0), 0);
+}
+
+/**
+ * If the photos across the whole form add up to more than can be sent in
+ * one request, shrink them all further (step by step) until they fit.
+ * Returns the (possibly re-shrunk) photos and the final total. Still
+ * readable at the smallest level (800px) - fine for spotting POS/H&S issues.
+ */
+export async function shrinkToFit<K extends string | number>(groups: Record<K, File[]>): Promise<{ groups: Record<K, File[]>; total: number }> {
+  let current = groups;
+  let total = totalSize(current as Record<string, File[]>);
+  for (const [dim, q] of FIT_LEVELS) {
+    if (total <= MAX_TOTAL_UPLOAD_BYTES) break;
+    const next = {} as Record<K, File[]>;
+    for (const key of Object.keys(current) as K[]) {
+      const out: File[] = [];
+      for (const f of current[key] || []) out.push(await compressImage(f, dim, q));
+      next[key] = out;
+    }
+    current = next;
+    total = totalSize(current as Record<string, File[]>);
+  }
+  return { groups: current, total };
 }
 
 export function formatMB(bytes: number): string {

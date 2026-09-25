@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Card } from "@/components/ui";
-import { compressImages, postFormData, formatMB, MAX_TOTAL_UPLOAD_BYTES } from "@/lib/clientUpload";
+import { compressImages, shrinkToFit, postFormData, formatMB, MAX_TOTAL_UPLOAD_BYTES } from "@/lib/clientUpload";
 import { type PosQuestion } from "@/lib/posWalkaround";
 
 type ShowroomOption = { id: string; name: string };
@@ -200,15 +200,14 @@ export default function POSWalkaroundForm({
     };
     const formData = new FormData();
     formData.set("payload", JSON.stringify(payload));
+    // If all the photos together are still too big for one request, shrink
+    // them further automatically before giving up (lib/clientUpload.ts).
+    const { groups: fittedFiles, total: totalBytes } = await shrinkToFit(fileAnswers);
     questions.forEach((q) => {
       if (q.type !== "photo") return;
-      (fileAnswers[q.qnum] || []).forEach((file) => formData.append(`file__${q.qnum}`, file, file.name));
+      (fittedFiles[q.qnum] || []).forEach((file) => formData.append(`file__${q.qnum}`, file, file.name));
     });
 
-    let totalBytes = 0;
-    formData.forEach((v) => {
-      if (v instanceof File) totalBytes += v.size;
-    });
     if (totalBytes > MAX_TOTAL_UPLOAD_BYTES) {
       setSubmitting(false);
       setSubmitError(`Your photos add up to ${formatMB(totalBytes)}, which is more than can be sent in one go (${formatMB(MAX_TOTAL_UPLOAD_BYTES)}). Remove a few photos and try again.`);
