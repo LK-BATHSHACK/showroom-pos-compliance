@@ -8,6 +8,7 @@ import DownloadStorePdfButton from "@/components/DownloadStorePdfButton";
 import HSOpenActionsTable, { HSOpenActionRow } from "@/components/HSOpenActionsTable";
 import HSReviewTabs from "@/components/HSReviewTabs";
 import ShowroomScoresPanel from "@/components/ShowroomScoresPanel";
+import HSKeyDatesPanel, { type KeyDatesRow } from "@/components/HSKeyDatesPanel";
 
 export const dynamic = "force-dynamic";
 
@@ -312,10 +313,41 @@ export default async function HSReviewPage({
     />
   );
 
+  // Key Dates tab - each site's latest H&S check, pulling the answers to
+  // Q38 (extinguisher service), Q67 (next fire drill) and Q47 (first aid
+  // kit expiry). hsSubmissions is already sorted newest first.
+  const hsQuestionIdByQnum = new Map<number, string>();
+  questions.forEach((q) => {
+    if (q.fields.Template?.includes(hsTemplate?.id || "") && q.fields.QuestionNumber) hsQuestionIdByQnum.set(q.fields.QuestionNumber, q.id);
+  });
+  const answerFor = (submissionId: string, qnum: number): string | null => {
+    const qid = hsQuestionIdByQnum.get(qnum);
+    if (!qid) return null;
+    const a = answers.find((x) => x.fields.Submission?.includes(submissionId) && x.fields.TemplateQuestion?.includes(qid));
+    return a?.fields.AnswerText?.trim() || null;
+  };
+  const keyDatesRows: KeyDatesRow[] = hsSiteOptions.map((site) => {
+    const latest = hsSubmissions.find((s) => s.fields.Site?.[0] === site.id);
+    return {
+      siteId: site.id,
+      siteName: site.fields.SiteName,
+      latestSubmissionId: latest?.id || null,
+      latestSubmissionDate: latest?.fields.SubmissionDate || null,
+      extinguisherService: latest ? answerFor(latest.id, 38) : null,
+      nextFireDrill: latest ? answerFor(latest.id, 67) : null,
+      firstAidKitExpiry: latest ? answerFor(latest.id, 47) : null,
+    };
+  });
+  const todayLondon = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/London", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+
   return (
     <div>
       <h1 style={{ fontSize: 24, marginBottom: 4 }}>H&S Review</h1>
-      <HSReviewTabs reviewContent={reviewContent} scoresContent={scoresContent} />
+      <HSReviewTabs
+        reviewContent={reviewContent}
+        scoresContent={scoresContent}
+        keyDatesContent={<HSKeyDatesPanel rows={keyDatesRows} today={todayLondon} />}
+      />
     </div>
   );
 }

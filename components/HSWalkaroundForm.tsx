@@ -98,6 +98,11 @@ const CONDITIONAL_QUESTIONS: Record<number, { dependsOnQnum: number; showWhen: (
 // different question numbers because they're in different sections.
 const MATRIX_ISSUE_POINTER: Record<number, number> = { 5: 9, 35: 40 };
 
+// "Tick to confirm" checkbox questions - anything left unticked is raised as
+// an action (lib/hsIssueChecks.ts). Chloe left Q46's poster box unticked
+// thinking that covered it (Lorraine, 25 Sep 2026), so say so on the form.
+const TICK_TO_CONFIRM_QNUMS = new Set([12, 46]);
+
 export default function HSWalkaroundForm({
   sites,
   lockedSite,
@@ -631,6 +636,11 @@ function QuestionField({
               <input type="checkbox" checked={multiValue.includes(opt)} onChange={(e) => onMultiToggle(opt, e.target.checked)} /> {opt}
             </label>
           ))}
+          {q.qnum && TICK_TO_CONFIRM_QNUMS.has(q.qnum) && (
+            <div style={{ fontSize: 12, color: "#966400", background: "#FFF4E0", borderRadius: 6, padding: "8px 10px", marginTop: 4 }}>
+              Anything you leave unticked will be flagged as needing attention - e.g. a missing poster will be sent to Salli to sort.
+            </div>
+          )}
         </div>
       );
       break;
@@ -666,7 +676,7 @@ function QuestionField({
       if (anyNo && pointerQnum) {
         matrixHint = (
           <div style={{ fontSize: 12, color: "#966400", background: "#FFF4E0", borderRadius: 6, padding: "8px 10px", marginTop: 10 }}>
-            Answered "No" to any of these? Please give the details in Q{pointerQnum} below.
+            Answered "No" to any of these? Each "No" is flagged for follow-up automatically - please add any detail in Q{pointerQnum} below.
           </div>
         );
       }

@@ -9,6 +9,7 @@
 import { listRecords, createRecords, uploadAttachment, TABLES, type AttachmentUpload } from "./airtable";
 import { sendEmail, emailShell, BRAND } from "./resend";
 import { formatFlaggedIssue, formatFreeTextIssue, formatRosterIssue, formatUncertainIssue } from "./hsActionLabels";
+import { extraIssuesForAnswer } from "./hsIssueChecks";
 
 export type AnswerType =
   | "Short answer"
@@ -650,6 +651,36 @@ export async function submitHSWalkaround(input: SubmissionInput) {
         UrgencyClass: "Digest",
       });
     }
+  });
+
+  // Extra checks (Lorraine, 25 Sep 2026) - expiry/service dates, matrix
+  // "No" rows, unticked confirm boxes, more "needs doing" options, and free
+  // text that mentions needing/missing something. See lib/hsIssueChecks.ts.
+  validAnswers.forEach((a, i) => {
+    const q = questionById.get(a.questionId)!;
+    // "I don't know"-style answers already raised an "unclear answer"
+    // action above - don't add a second, near-identical one.
+    const alreadyUnclear =
+      !!q.qnum &&
+      !ISSUE_FIELD_QUESTION_NUMBERS.has(q.qnum) &&
+      (q.answerType === "Short answer" || q.answerType === "Long answer") &&
+      isUncertainAnswer(a.value);
+    extraIssuesForAnswer(q, a.value, today)
+      .filter((issue) => !(alreadyUnclear && issue.kind === "possible issue in answer"))
+      .forEach((issue) => {
+        actionsToCreate.push({
+          Name: `${site.name} - Q${q.qnum} ${issue.kind}`,
+          Status: "Open",
+          Site: [site.id],
+          SourceAnswer: [answerRecords[i].id],
+          IssueDescription: issue.description,
+          Priority: issue.priority,
+          OwnerName: input.submittedByName,
+          OwnerEmail: input.submittedByEmail,
+          DateIdentified: today,
+          UrgencyClass: "Digest",
+        });
+      });
   });
 
   // Q49/Q53 consistency check (Salli, 2 Sep 2026): kit reported used but no
