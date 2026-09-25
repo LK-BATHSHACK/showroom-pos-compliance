@@ -7,6 +7,10 @@ import { MAX_ATTACHMENT_BYTES, type AttachmentUpload } from "@/lib/airtable";
 // API) - not edge-safe, same reasoning as /api/upload-audit.
 export const runtime = "nodejs";
 
+// Several photos each upload to Airtable one after another, which can run
+// past Vercel's 10s default - allow up to 60s (25 Sep 2026 fix).
+export const maxDuration = 60;
+
 // Submitted as multipart/form-data, not JSON, because H&S Walkaround
 // submissions can carry photos (Q62, up to 10 files): a "payload" field
 // holds the same {siteId, answers} JSON as before, and any selected photo

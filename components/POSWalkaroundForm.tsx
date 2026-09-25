@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Card } from "@/components/ui";
+import { compressImages, postFormData, formatMB, MAX_TOTAL_UPLOAD_BYTES } from "@/lib/clientUpload";
 import { type PosQuestion } from "@/lib/posWalkaround";
 
 type ShowroomOption = { id: string; name: string };
@@ -38,6 +39,8 @@ export default function POSWalkaroundForm({
   const [fileAnswers, setFileAnswers] = useState<Record<number, File[]>>({});
   const [errors, setErrors] = useState<Record<number, string>>({});
   const [submitting, setSubmitting] = useState(false);
+  // >0 while photos are being shrunk in the browser - submit waits for it.
+  const [compressing, setCompressing] = useState(0);
   const [result, setResult] = useState<any>(null);
   const [submitError, setSubmitError] = useState("");
 
@@ -88,10 +91,21 @@ export default function POSWalkaroundForm({
     });
   }
 
-  function setFiles(q: PosQuestion, incoming: FileList | null) {
-    if (!incoming) return;
+  async function setFiles(q: PosQuestion, incoming: FileList | null) {
+    if (!incoming || incoming.length === 0) return;
+    // Copy out of the FileList straight away (the input gets reset), then
+    // shrink each photo in the browser before it's held for upload - see
+    // lib/clientUpload.ts for why (Vercel's 4.5MB request cap).
+    const picked = Array.from(incoming);
+    setCompressing((n) => n + 1);
+    let shrunk: File[];
+    try {
+      shrunk = await compressImages(picked);
+    } finally {
+      setCompressing((n) => n - 1);
+    }
     const existing = fileAnswers[q.qnum] || [];
-    const combined = [...existing, ...Array.from(incoming)];
+    const combined = [...existing, ...shrunk];
     const tooBig = combined.find((f) => f.size > MAX_FILE_BYTES);
     if (tooBig) {
       setErrors((prev) => ({ ...prev, [q.qnum]: `"${tooBig.name}" is over the 5MB limit - try a smaller photo.` }));
@@ -191,11 +205,20 @@ export default function POSWalkaroundForm({
       (fileAnswers[q.qnum] || []).forEach((file) => formData.append(`file__${q.qnum}`, file, file.name));
     });
 
-    const res = await fetch("/api/pos-submission", { method: "POST", body: formData });
+    let totalBytes = 0;
+    formData.forEach((v) => {
+      if (v instanceof File) totalBytes += v.size;
+    });
+    if (totalBytes > MAX_TOTAL_UPLOAD_BYTES) {
+      setSubmitting(false);
+      setSubmitError(`Your photos add up to ${formatMB(totalBytes)}, which is more than can be sent in one go (${formatMB(MAX_TOTAL_UPLOAD_BYTES)}). Remove a few photos and try again.`);
+      return;
+    }
+
+    const { ok, body } = await postFormData("/api/pos-submission", formData);
     setSubmitting(false);
-    const body = await res.json();
-    if (!res.ok) {
-      setSubmitError(body.error || "Something went wrong.");
+    if (!ok) {
+      setSubmitError(body?.error || "Something went wrong.");
       return;
     }
     setResult(body);
@@ -341,10 +364,10 @@ export default function POSWalkaroundForm({
         {isLastSection && (
           <button
             type="submit"
-            disabled={submitting}
+            disabled={submitting || compressing > 0}
             style={{ background: "#E6017E", color: "#fff", border: "none", borderRadius: 6, padding: "12px 28px", fontSize: 15, fontWeight: 600, cursor: "pointer" }}
           >
-            {submitting ? "Submitting..." : "Submit walkaround"}
+            {submitting ? "Submitting..." : compressing > 0 ? "Preparing photos..." : "Submit walkaround"}
           </button>
         )}
         {submitError && <div style={{ color: "#d03b3b", fontSize: 13, width: "100%" }}>{submitError}</div>}
@@ -427,7 +450,7 @@ function QuestionField({
             style={{ fontSize: 13 }}
           />
           <div style={{ fontSize: 12, color: "#6E6E6E", marginTop: 6 }}>
-            Up to {MAX_FILES_PER_QUESTION} photos, 5MB each.
+            Up to {MAX_FILES_PER_QUESTION} photos - they are shrunk automatically before sending.
           </div>
           {fileValue.length > 0 && (
             <ul style={{ marginTop: 8, paddingLeft: 18, fontSize: 13 }}>

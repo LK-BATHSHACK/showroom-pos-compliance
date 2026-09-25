@@ -8,6 +8,10 @@ import { MAX_ATTACHMENT_BYTES, type AttachmentUpload } from "@/lib/airtable";
 // /api/upload-audit.
 export const runtime = "nodejs";
 
+// Several photos each upload to Airtable one after another, which can run
+// past Vercel's 10s default - allow up to 60s (25 Sep 2026 fix).
+export const maxDuration = 60;
+
 // Submitted as multipart/form-data (same shape as /api/hs-submission): a
 // "payload" field holds {showroomId, showroomName, answers} JSON, and any
 // selected photos are appended as "file__<qnum>" fields.
