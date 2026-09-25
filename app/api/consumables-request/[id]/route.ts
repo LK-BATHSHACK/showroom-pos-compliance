@@ -36,7 +36,10 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     if (!session.siteId || request.siteId !== session.siteId) {
       return NextResponse.json({ error: "You can only update your own site's requests." }, { status: 403 });
     }
-    await markConsumablesReceived(params.id, session.name);
+    await markConsumablesReceived(params.id, session.name, {
+      notifyOperations: true,
+      appHost: req.headers.get("host") || undefined,
+    });
     return NextResponse.json({ success: true });
   }
 

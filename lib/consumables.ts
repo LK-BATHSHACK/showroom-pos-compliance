@@ -415,8 +415,17 @@ export async function sendConsumablesUpdate(input: {
   return { emailed: true, photoUploadErrors };
 }
 
-/** Store confirms the order arrived - sets Fulfilled and records who/when. */
-export async function markConsumablesReceived(id: string, receivedByName: string): Promise<void> {
+/**
+ * Store confirms the order arrived - sets Fulfilled and records who/when.
+ * When a store does this (notifyOperations = true), Chris/Operations gets an
+ * email so he knows it landed (Lorraine, 25 Sep 2026: "yes send him an
+ * email"). Not sent when Chris/Admin sets Fulfilled themselves.
+ */
+export async function markConsumablesReceived(
+  id: string,
+  receivedByName: string,
+  opts: { notifyOperations?: boolean; appHost?: string } = {}
+): Promise<void> {
   const today = new Date().toISOString().slice(0, 10);
   await updateRecords(TABLES.CONSUMABLES_REQUESTS, [
     {
@@ -430,4 +439,29 @@ export async function markConsumablesReceived(id: string, receivedByName: string
       },
     },
   ]);
+
+  if (!opts.notifyOperations) return;
+  // Email failures shouldn't undo or block the store's "received" - log and move on.
+  try {
+    const request = (await fetchConsumablesRequests()).find((r) => r.id === id);
+    const siteName = request?.siteName || "A store";
+    const itemListHtml = (request?.lines || []).map((l) => `<li>${escapeHtml(l.itemName)} &times; ${l.quantity}</li>`).join("");
+    const link = opts.appHost
+      ? `<p style="margin-top:20px;"><a href="https://${opts.appHost}/consumables" style="color:${BRAND.pink};">Open the Consumables Dashboard</a></p>`
+      : "";
+    await sendEmail(
+      process.env.CONSUMABLES_NOTIFY_EMAIL || "chris.agnew@bathshack.com",
+      `Received: consumables order at ${siteName}`,
+      emailShell(
+        "Consumables Order Received",
+        `<p><strong>${escapeHtml(siteName)}</strong> has marked their order as received.</p>
+         <p><strong>Received by:</strong> ${escapeHtml(receivedByName)}<br/>
+         <strong>Date:</strong> ${today}${request?.dateRequested ? `<br/><strong>Requested:</strong> ${request.dateRequested}` : ""}</p>
+         ${itemListHtml ? `<p><strong>Items:</strong></p><ul>${itemListHtml}</ul>` : ""}
+         ${link}`
+      )
+    );
+  } catch (err) {
+    console.error("Consumables received email failed:", err);
+  }
 }
