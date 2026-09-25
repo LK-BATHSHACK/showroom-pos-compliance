@@ -12,8 +12,13 @@
 //   - Consumables Request Lines: one row per item within a basket
 //     (Request -> Item + Quantity).
 //
-// Status workflow (confirmed with Lorraine 10 Sep 2026): Requested ->
-// Ordered -> Fulfilled, lives on the Consumables Requests record (the whole
+// Status workflow (confirmed with Lorraine 10 Sep 2026, renamed 25 Sep 2026):
+// Requested -> Sent -> Fulfilled. "Sent" replaced "Ordered" (Lorraine: "can i
+// have the status changed to say Sent rather than ordered"); any old
+// "Ordered" value is read back as "Sent". Chris/Operations moves a request to
+// Sent by sending the store a delivery update (packages, method, timing,
+// photo - sendConsumablesUpdate below); the store marks it Fulfilled with
+// "Mark as received" when it arrives (markConsumablesReceived). The status lives on the Consumables Requests record (the whole
 // basket moves together, not per line item - simplest match for "order the
 // basket, mark it done once it all turns up").
 //
@@ -26,8 +31,17 @@
 // new item still slots into the existing "top items"/"by category" reporting
 // cleanly - it doesn't invent new categories.
 
-import { listRecords, createRecords, updateRecords, TABLES } from "./airtable";
+import { listRecords, createRecords, updateRecords, getRecord, uploadAttachment, TABLES, type AttachmentUpload } from "./airtable";
 import { sendEmail, emailShell, BRAND } from "./resend";
+
+export const CONSUMABLES_STATUSES = ["Requested", "Sent", "Fulfilled"] as const;
+export const DELIVERY_METHODS = ["Van drop", "DPD", "Post", "Other courier", "Collection"] as const;
+
+/** Old records may still say "Ordered" - show them as "Sent". */
+export function normaliseStatus(s: string | undefined): string {
+  if (!s) return "Requested";
+  return s === "Ordered" ? "Sent" : s;
+}
 
 export const CONSUMABLE_CATEGORIES = [
   "Toilet & Washroom",
@@ -65,7 +79,57 @@ export type ConsumablesRequestRow = {
   statusUpdatedByName: string | null;
   notes: string | null;
   lines: ConsumablesRequestLine[];
+  update: ConsumablesUpdate | null;
+  receivedByName: string | null;
+  receivedDate: string | null;
 };
+
+export type ConsumablesUpdate = {
+  message: string | null;
+  deliveryMethod: string | null;
+  expectedDelivery: string | null;
+  packageCount: number | null;
+  photos: { url: string; thumbUrl: string; filename: string }[];
+  sentByName: string | null;
+  sentDate: string | null;
+};
+
+type RequestFields = {
+  Name: string;
+  Site?: string[];
+  RequestedByName?: string;
+  RequestedByEmail?: string;
+  DateRequested?: string;
+  Status?: string;
+  StatusUpdatedDate?: string;
+  StatusUpdatedByName?: string;
+  Notes?: string;
+  UpdateMessage?: string;
+  DeliveryMethod?: string;
+  ExpectedDelivery?: string;
+  PackageCount?: number;
+  UpdatePhotos?: { url?: string; filename?: string; thumbnails?: { large?: { url: string } } }[];
+  UpdateSentByName?: string;
+  UpdateSentDate?: string;
+  ReceivedByName?: string;
+  ReceivedDate?: string;
+};
+
+function updateFromFields(f: RequestFields): ConsumablesUpdate | null {
+  const has = f.UpdateSentDate || f.UpdateMessage || f.DeliveryMethod || f.ExpectedDelivery || f.PackageCount || (f.UpdatePhotos || []).length;
+  if (!has) return null;
+  return {
+    message: f.UpdateMessage || null,
+    deliveryMethod: f.DeliveryMethod || null,
+    expectedDelivery: f.ExpectedDelivery || null,
+    packageCount: typeof f.PackageCount === "number" ? f.PackageCount : null,
+    photos: (f.UpdatePhotos || [])
+      .filter((p) => p.url)
+      .map((p) => ({ url: p.url as string, thumbUrl: p.thumbnails?.large?.url || (p.url as string), filename: p.filename || "photo.jpg" })),
+    sentByName: f.UpdateSentByName || null,
+    sentDate: f.UpdateSentDate || null,
+  };
+}
 
 export async function fetchConsumableCatalog(): Promise<ConsumableItem[]> {
   const records = await listRecords<{ Name: string; Category?: string; Unit?: string; Active?: boolean }>(
@@ -86,17 +150,7 @@ export async function fetchConsumableCatalog(): Promise<ConsumableItem[]> {
 /** Fetches every Consumables Request with its line items joined in, newest first. Used by the dashboard - no date-range param, the dashboard filters client-side so KPIs can react instantly without a re-fetch. */
 export async function fetchConsumablesRequests(): Promise<ConsumablesRequestRow[]> {
   const [requests, lines, items, sites] = await Promise.all([
-    listRecords<{
-      Name: string;
-      Site?: string[];
-      RequestedByName?: string;
-      RequestedByEmail?: string;
-      DateRequested?: string;
-      Status?: string;
-      StatusUpdatedDate?: string;
-      StatusUpdatedByName?: string;
-      Notes?: string;
-    }>(TABLES.CONSUMABLES_REQUESTS, { sort: [{ field: "DateRequested", direction: "desc" }] }),
+    listRecords<RequestFields>(TABLES.CONSUMABLES_REQUESTS, { sort: [{ field: "DateRequested", direction: "desc" }] }),
     listRecords<{ Request?: string[]; Item?: string[]; Quantity?: number; Notes?: string }>(TABLES.CONSUMABLES_REQUEST_LINES),
     listRecords<{ Name: string }>(TABLES.CONSUMABLE_ITEMS),
     listRecords<{ SiteName: string }>(TABLES.SITES),
@@ -131,11 +185,14 @@ export async function fetchConsumablesRequests(): Promise<ConsumablesRequestRow[
       requestedByName: r.fields.RequestedByName || "-",
       requestedByEmail: r.fields.RequestedByEmail || "",
       dateRequested: r.fields.DateRequested || "",
-      status: r.fields.Status || "Requested",
+      status: normaliseStatus(r.fields.Status),
       statusUpdatedDate: r.fields.StatusUpdatedDate || null,
       statusUpdatedByName: r.fields.StatusUpdatedByName || null,
       notes: r.fields.Notes || null,
       lines: linesByRequestId.get(r.id) || [],
+      update: updateFromFields(r.fields),
+      receivedByName: r.fields.ReceivedByName || null,
+      receivedDate: r.fields.ReceivedDate || null,
     };
   });
 }
@@ -255,4 +312,122 @@ export async function updateConsumableItem(
   if (patch.unit !== undefined) fields.Unit = patch.unit.trim();
   if (patch.active !== undefined) fields.Active = patch.active;
   await updateRecords(TABLES.CONSUMABLE_ITEMS, [{ id, fields }]);
+}
+
+/** Site + requester of one request - used to check a Store Manager is only acting on their own site's requests. */
+export async function getConsumablesRequestSummary(id: string): Promise<{ siteId: string | null; status: string; requestedByEmail: string; requestedByName: string; name: string } | null> {
+  try {
+    const r = await getRecord<RequestFields>(TABLES.CONSUMABLES_REQUESTS, id);
+    return {
+      siteId: r.fields.Site?.[0] || null,
+      status: normaliseStatus(r.fields.Status),
+      requestedByEmail: r.fields.RequestedByEmail || "",
+      requestedByName: r.fields.RequestedByName || "",
+      name: r.fields.Name || "",
+    };
+  } catch {
+    return null;
+  }
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+/**
+ * Chris/Operations' delivery update to the store (Lorraine, 25 Sep 2026: "Is
+ * there nowhere to be able to respond to this? Would love to send them an
+ * image covering how many packages they are getting ... and roughly when and
+ * how e.g. 'on van drop for next week' or 'arriving by DPD next day'").
+ *
+ * Saves the update on the request, replaces any earlier update photos, moves
+ * the request to "Sent" (unless it's already Fulfilled), and emails the
+ * person who made the request with the details and the photos attached.
+ * Sending again overwrites the previous update and emails again.
+ */
+export async function sendConsumablesUpdate(input: {
+  id: string;
+  message: string;
+  deliveryMethod: string;
+  expectedDelivery: string;
+  packageCount: number | null;
+  photos: AttachmentUpload[];
+  sentByName: string;
+  appHost?: string;
+}): Promise<{ emailed: boolean; photoUploadErrors: string[] }> {
+  const existing = await getRecord<RequestFields>(TABLES.CONSUMABLES_REQUESTS, input.id);
+  const today = new Date().toISOString().slice(0, 10);
+  const currentStatus = normaliseStatus(existing.fields.Status);
+
+  const fields: Record<string, any> = {
+    UpdateMessage: input.message,
+    DeliveryMethod: input.deliveryMethod || null,
+    ExpectedDelivery: input.expectedDelivery,
+    PackageCount: input.packageCount,
+    UpdateSentByName: input.sentByName,
+    UpdateSentDate: today,
+  };
+  if (input.photos.length) fields.UpdatePhotos = []; // new photos replace the old ones
+  if (currentStatus !== "Fulfilled") {
+    fields.Status = "Sent";
+    fields.StatusUpdatedDate = today;
+    fields.StatusUpdatedByName = input.sentByName;
+  }
+  await updateRecords(TABLES.CONSUMABLES_REQUESTS, [{ id: input.id, fields }]);
+
+  const photoUploadErrors: string[] = [];
+  for (const p of input.photos) {
+    try {
+      await uploadAttachment(input.id, "UpdatePhotos", p);
+    } catch (err) {
+      console.error(err);
+      photoUploadErrors.push(p.filename);
+    }
+  }
+
+  const to = existing.fields.RequestedByEmail;
+  if (!to) return { emailed: false, photoUploadErrors };
+
+  const siteName = (existing.fields.Name || "").replace(/ - \d{4}-\d{2}-\d{2}$/, "") || "your store";
+  const firstName = (existing.fields.RequestedByName || "").trim().split(" ")[0] || "there";
+  const rows: string[] = [];
+  if (input.packageCount) rows.push(`<strong>Packages:</strong> ${input.packageCount}`);
+  if (input.deliveryMethod) rows.push(`<strong>Coming by:</strong> ${escapeHtml(input.deliveryMethod)}`);
+  if (input.expectedDelivery) rows.push(`<strong>Expected:</strong> ${escapeHtml(input.expectedDelivery)}`);
+  const link = input.appHost
+    ? `<p style="margin:24px 0;"><a href="https://${input.appHost}/consumables" style="background:${BRAND.pink}; color:#fff; padding:12px 20px; text-decoration:none; font-weight:bold; border-radius:4px;">Mark as received when it arrives</a></p>`
+    : "";
+  await sendEmail(
+    to,
+    `Your consumables order is on its way - ${siteName}`,
+    emailShell(
+      "Consumables Update",
+      `<p>Hi ${escapeHtml(firstName)},</p>
+       <p>Your consumables request from ${existing.fields.DateRequested || "recently"} has been sent.</p>
+       ${rows.length ? `<p>${rows.join("<br/>")}</p>` : ""}
+       ${input.message ? `<p>${escapeHtml(input.message).replace(/\n/g, "<br/>")}</p>` : ""}
+       ${input.photos.length ? `<p style="color:${BRAND.grey}; font-size:13px;">Photo${input.photos.length === 1 ? "" : "s"} of what's coming attached, so you can check it's all there if the driver drops it off.</p>` : ""}
+       ${link}
+       <p style="color:${BRAND.grey}; font-size:13px;">Sent by ${escapeHtml(input.sentByName)}.</p>`
+    ),
+    input.photos.map((p) => ({ filename: p.filename, content: Buffer.from(p.base64, "base64") }))
+  );
+  return { emailed: true, photoUploadErrors };
+}
+
+/** Store confirms the order arrived - sets Fulfilled and records who/when. */
+export async function markConsumablesReceived(id: string, receivedByName: string): Promise<void> {
+  const today = new Date().toISOString().slice(0, 10);
+  await updateRecords(TABLES.CONSUMABLES_REQUESTS, [
+    {
+      id,
+      fields: {
+        Status: "Fulfilled",
+        StatusUpdatedDate: today,
+        StatusUpdatedByName: receivedByName,
+        ReceivedByName: receivedByName,
+        ReceivedDate: today,
+      },
+    },
+  ]);
 }

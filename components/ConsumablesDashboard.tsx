@@ -1,8 +1,10 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Card, KpiCard } from "@/components/ui";
+import ConsumablesUpdateSummary, { type UpdateView } from "@/components/ConsumablesUpdateSummary";
+import ConsumablesUpdateForm from "@/components/ConsumablesUpdateForm";
 
 type Line = { id: string; itemId: string | null; itemName: string; quantity: number; notes: string | null };
 type Row = {
@@ -17,13 +19,17 @@ type Row = {
   statusUpdatedByName: string | null;
   notes: string | null;
   lines: Line[];
+  update: UpdateView | null;
+  receivedByName: string | null;
+  receivedDate: string | null;
 };
 type CatalogItem = { id: string; name: string; category: string | null; unit: string | null; active: boolean };
 
-const STATUSES = ["Requested", "Ordered", "Fulfilled"];
+// "Sent" replaced "Ordered" (Lorraine, 25 Sep 2026).
+const STATUSES = ["Requested", "Sent", "Fulfilled"];
 const STATUS_STYLE: Record<string, { bg: string; fg: string }> = {
   Requested: { bg: "#FFEBB0", fg: "#966400" },
-  Ordered: { bg: "#E8EEFF", fg: "#3348B0" },
+  Sent: { bg: "#E8EEFF", fg: "#3348B0" },
   Fulfilled: { bg: "#DFF5DF", fg: "#1E7A1E" },
 };
 
@@ -50,6 +56,9 @@ export default function ConsumablesDashboard({
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [savingId, setSavingId] = useState<string | null>(null);
+  // Which request's "Send update" panel is open, and the confirmation after sending.
+  const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const [flash, setFlash] = useState("");
 
   // "Add item" (Lorraine, 10 Sep 2026: "allow admin to add in more when
   // needed with an add button") - Admin-only, see app/api/consumable-items.
@@ -448,6 +457,9 @@ export default function ConsumablesDashboard({
         )}
       </div>
 
+      {flash && (
+        <div style={{ background: "#DFF5DF", color: "#1E7A1E", borderRadius: 8, padding: "10px 14px", marginBottom: 12, fontSize: 14 }}>{flash}</div>
+      )}
       <Card>
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
           <thead>
@@ -456,7 +468,7 @@ export default function ConsumablesDashboard({
               <th>Store</th>
               <th>Requested by</th>
               <th>Items</th>
-              <th>Note</th>
+              <th>Note / update</th>
               <th>Status</th>
             </tr>
           </thead>
@@ -464,7 +476,8 @@ export default function ConsumablesDashboard({
             {visible.map((r) => {
               const style = STATUS_STYLE[r.status] || STATUS_STYLE.Requested;
               return (
-                <tr key={r.id} style={{ borderBottom: "1px solid #f2f2f2", verticalAlign: "top" }}>
+                <Fragment key={r.id}>
+                <tr style={{ borderBottom: updatingId === r.id ? "none" : "1px solid #f2f2f2", verticalAlign: "top" }}>
                   <td style={{ padding: "8px 6px", whiteSpace: "nowrap" }}>{r.dateRequested}</td>
                   <td>{r.siteName}</td>
                   <td>{r.requestedByName}</td>
@@ -476,7 +489,10 @@ export default function ConsumablesDashboard({
                       </div>
                     ))}
                   </td>
-                  <td style={{ color: "#6E6E6E", fontSize: 13 }}>{r.notes || "-"}</td>
+                  <td style={{ color: "#6E6E6E", fontSize: 13 }}>
+                    {r.notes || "-"}
+                    {r.update && <ConsumablesUpdateSummary update={r.update} />}
+                  </td>
                   <td>
                     {canManageStatus ? (
                       <select
@@ -504,8 +520,43 @@ export default function ConsumablesDashboard({
                         {r.statusUpdatedDate ? ` - ${r.statusUpdatedDate}` : ""}
                       </div>
                     )}
+                    {r.receivedByName && (
+                      <div style={{ fontSize: 11, color: "#1E7A1E", marginTop: 2 }}>Received by {r.receivedByName}</div>
+                    )}
+                    {canManageStatus && updatingId !== r.id && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFlash("");
+                          setUpdatingId(r.id);
+                        }}
+                        style={{ display: "block", marginTop: 6, background: "none", border: "1px solid #E6017E", color: "#E6017E", borderRadius: 6, padding: "4px 10px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}
+                      >
+                        {r.update ? "Edit update" : "Send update"}
+                      </button>
+                    )}
                   </td>
                 </tr>
+                {updatingId === r.id && (
+                  <tr style={{ borderBottom: "1px solid #f2f2f2" }}>
+                    <td colSpan={6}>
+                      <ConsumablesUpdateForm
+                        requestId={r.id}
+                        siteName={r.siteName}
+                        requestedByName={r.requestedByName}
+                        hasEmail={!!r.requestedByEmail}
+                        existing={r.update}
+                        onCancel={() => setUpdatingId(null)}
+                        onDone={(msg) => {
+                          setUpdatingId(null);
+                          setFlash(msg);
+                          router.refresh();
+                        }}
+                      />
+                    </td>
+                  </tr>
+                )}
+                </Fragment>
               );
             })}
             {visible.length === 0 && (

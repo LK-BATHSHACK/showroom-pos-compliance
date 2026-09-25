@@ -10,7 +10,9 @@ function getClient() {
   return client;
 }
 
-export async function sendEmail(to: string | string[], subject: string, html: string) {
+export type EmailAttachment = { filename: string; content: Buffer };
+
+export async function sendEmail(to: string | string[], subject: string, html: string, attachments?: EmailAttachment[]) {
   if (!process.env.RESEND_API_KEY) {
     console.warn("RESEND_API_KEY not set - skipping email send:", subject);
     return { skipped: true };
@@ -27,6 +29,7 @@ export async function sendEmail(to: string | string[], subject: string, html: st
     to,
     subject,
     html,
+    ...(attachments && attachments.length ? { attachments } : {}),
   });
   if (result.error) {
     // Resend's SDK resolves (doesn't reject) on a send failure, so without
