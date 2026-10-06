@@ -22,6 +22,13 @@
 // basket moves together, not per line item - simplest match for "order the
 // basket, mark it done once it all turns up").
 //
+// One open order at a time (6 Oct 2026, Lorraine: "can we let the manager
+// 1. Mark the order as fulfilled 2. No orders made until marked as
+// fulfilled?"): a Store Manager can't submit a new request while their site
+// still has one that isn't Fulfilled. Enforced server-side in
+// app/api/consumables-request/route.ts via getOpenConsumablesRequestsForSite,
+// and the Submit tab swaps the form for the open order + "Mark as received".
+//
 // Catalog management (added 10 Sep 2026, Lorraine: "allow admin to add in
 // more when needed with an add button") - Admin can add a new catalog item
 // straight from the Dashboard tab (see ConsumablesDashboard.tsx and
@@ -277,6 +284,21 @@ export async function updateConsumablesRequestStatus(id: string, status: string,
   await updateRecords(TABLES.CONSUMABLES_REQUESTS, [
     { id, fields: { Status: status, StatusUpdatedDate: today, StatusUpdatedByName: updatedByName } },
   ]);
+}
+
+/** A request stays "open" until the store marks it received (Fulfilled). Old "Ordered" counts as Sent, so also open. */
+export function isOpenStatus(status: string | undefined): boolean {
+  return normaliseStatus(status) !== "Fulfilled";
+}
+
+/** A site's requests that aren't Fulfilled yet - used to stop a Store Manager ordering again until the last order is marked received. Reads only the requests table (no joins), and filters by site in code because linked-record fields can't be matched by id in an Airtable formula. */
+export async function getOpenConsumablesRequestsForSite(
+  siteId: string
+): Promise<{ id: string; dateRequested: string; status: string }[]> {
+  const requests = await listRecords<RequestFields>(TABLES.CONSUMABLES_REQUESTS);
+  return requests
+    .filter((r) => r.fields.Site?.includes(siteId) && isOpenStatus(r.fields.Status))
+    .map((r) => ({ id: r.id, dateRequested: r.fields.DateRequested || "", status: normaliseStatus(r.fields.Status) }));
 }
 
 /** Adds a new item to the Consumable Items catalog (Admin, via the Dashboard's "Add item" form). */

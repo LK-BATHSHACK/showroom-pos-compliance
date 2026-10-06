@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireRole } from "@/lib/auth";
 import { listRecords, TABLES } from "@/lib/airtable";
-import { createConsumablesRequest } from "@/lib/consumables";
+import { createConsumablesRequest, getOpenConsumablesRequestsForSite } from "@/lib/consumables";
 
 export async function POST(req: NextRequest) {
   const session = await requireRole(["Admin", "Marketing", "Store Manager"]);
@@ -20,6 +20,23 @@ export async function POST(req: NextRequest) {
     const resolvedSiteId = session.role === "Store Manager" ? session.siteId : siteId;
     if (!resolvedSiteId) {
       return NextResponse.json({ error: "Site is required." }, { status: 400 });
+    }
+    // One open order at a time (Lorraine, 6 Oct 2026: "No orders made until
+    // marked as fulfilled"). A Store Manager whose site still has a request
+    // that isn't Fulfilled has to mark it received first. Enforced here, not
+    // just by hiding the form. Admin/Marketing aren't blocked - they can place
+    // an order on a store's behalf, and Admin/Operations can mark Fulfilled.
+    if (session.role === "Store Manager") {
+      const open = await getOpenConsumablesRequestsForSite(resolvedSiteId);
+      if (open.length > 0) {
+        const since = open.map((o) => o.dateRequested).filter(Boolean).sort()[0];
+        return NextResponse.json(
+          {
+            error: `You still have an open request${since ? ` from ${since}` : ""}. Please mark it as received before sending a new one.`,
+          },
+          { status: 409 }
+        );
+      }
     }
     // Quantity is fixed at 1 for now (Lorraine, 23 Sep 2026: "We would like
     // the quantity option removed for now so they can't order more than 1 qty

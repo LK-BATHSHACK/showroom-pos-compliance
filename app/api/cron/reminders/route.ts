@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { listRecords, TABLES } from "@/lib/airtable";
 import { runPosMonthlyReminders, londonToday } from "@/lib/posReminders";
+import { runConsumablesReceivedReminders } from "@/lib/consumablesReminders";
 import { sendEmail, emailShell, BRAND } from "@/lib/resend";
 import { fetchSites, getHSNotifyEmails, HS_MONTHLY_DUE_DAY } from "@/lib/hsSubmission";
 
@@ -33,6 +34,18 @@ export async function GET(req: NextRequest) {
   // anyone had filled them in alongside this.
   const appOrigin = process.env.APP_URL || req.nextUrl.origin;
   const posMonthly = await runPosMonthlyReminders(londonToday(), appOrigin);
+
+  // "Has your consumables order arrived?" nudge (6 Oct 2026) - Mondays and
+  // Thursdays, to whoever made a request that's been on Sent 3+ days. See
+  // lib/consumablesReminders.ts. Wrapped so a failure here can't stop the
+  // other reminders below from running.
+  let consumablesReminders: Awaited<ReturnType<typeof runConsumablesReceivedReminders>> | { error: string } = { sent: [], ordersChased: 0 };
+  try {
+    consumablesReminders = await runConsumablesReceivedReminders(londonToday(), appOrigin);
+  } catch (err: any) {
+    console.error("Consumables received reminders failed:", err);
+    consumablesReminders = { error: err?.message || "failed" };
+  }
 
   let actionEscalations = 0;
 
@@ -94,5 +107,5 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  return NextResponse.json({ success: true, posMonthly, actionEscalations, hsOverdueDigestSent });
+  return NextResponse.json({ success: true, posMonthly, consumablesReminders, actionEscalations, hsOverdueDigestSent });
 }

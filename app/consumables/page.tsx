@@ -1,9 +1,10 @@
 import { redirect } from "next/navigation";
 import { requireRole } from "@/lib/auth";
 import { fetchSites } from "@/lib/hsSubmission";
-import { fetchConsumableCatalog, fetchConsumablesRequests } from "@/lib/consumables";
+import { fetchConsumableCatalog, fetchConsumablesRequests, isOpenStatus } from "@/lib/consumables";
 import ConsumablesRequestForm from "@/components/ConsumablesRequestForm";
 import ConsumablesHistoryTable from "@/components/ConsumablesHistoryTable";
+import ConsumablesOpenOrderNotice from "@/components/ConsumablesOpenOrderNotice";
 import ConsumablesDashboard from "@/components/ConsumablesDashboard";
 import ConsumablesTabs from "@/components/ConsumablesTabs";
 
@@ -26,9 +27,18 @@ export default async function ConsumablesPage() {
   // Store Manager and Admin/Marketing get "Request" (Operations/Chris never
   // needs to submit one, he only fulfils them).
   if (session.role === "Store Manager" || session.role === "Admin" || session.role === "Marketing") {
+    // A Store Manager with an order that isn't Fulfilled yet sees that order
+    // (with "Mark as received") instead of the form - one open order at a time
+    // (Lorraine, 6 Oct 2026). The API enforces the same rule.
+    const openOrders =
+      session.role === "Store Manager" ? requests.filter((r) => r.siteId === session.siteId && isOpenStatus(r.status)) : [];
     const requestContent = (
       <div>
-        <ConsumablesRequestForm sites={sites} lockedSite={lockedSite} catalog={catalog} />
+        {openOrders.length > 0 ? (
+          <ConsumablesOpenOrderNotice rows={openOrders} />
+        ) : (
+          <ConsumablesRequestForm sites={sites} lockedSite={lockedSite} catalog={catalog} />
+        )}
         {session.role === "Store Manager" && (
           <div style={{ height: 24 }}>
             <div style={{ height: 20 }} />
@@ -63,7 +73,8 @@ export default async function ConsumablesPage() {
       <h1 style={{ fontSize: 24, marginBottom: 4 }}>Consumables</h1>
       <p style={{ color: "#6E6E6E", marginTop: 0, marginBottom: 24 }}>
         Request everyday items (toilet roll, cleaning supplies, stationery, printer toner, cash envelopes, and anything else added to
-        the list) - each request goes straight to Chris Agnew.
+        the list) - each request goes straight to Chris Agnew. Mark an order as received when it arrives; you can send
+        a new request once your last one has been marked received.
       </p>
       <ConsumablesTabs tabs={tabs} />
     </div>
