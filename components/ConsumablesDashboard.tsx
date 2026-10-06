@@ -61,7 +61,7 @@ export default function ConsumablesDashboard({
   const [flash, setFlash] = useState("");
 
   // "Add item" (Lorraine, 10 Sep 2026: "allow admin to add in more when
-  // needed with an add button") - Admin-only, see app/api/consumable-items.
+  // needed with an add button") - Admin + Operations, see app/api/consumable-items.
   const [addingItem, setAddingItem] = useState(false);
   const [newItemName, setNewItemName] = useState("");
   const [newItemCategory, setNewItemCategory] = useState(CATEGORIES[0]);
@@ -153,7 +153,7 @@ export default function ConsumablesDashboard({
   }
 
   // Edit / Remove existing catalog items (Lorraine, 23 Sep 2026: "how do we
-  // delete or edit existing options?") - Admin only. Remove is a soft remove
+  // delete or edit existing options?") - Admin + Operations. Remove is a soft remove
   // (Active off), so past requests keep their history.
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
@@ -208,7 +208,7 @@ export default function ConsumablesDashboard({
   return (
     <div>
       {/* "Manage catalog" (Lorraine, 10 Sep 2026: "allow admin to add in more
-          when needed with an add button") - Admin only, so a new item can be
+          when needed with an add button") - Admin + Operations, so a new item can be
           added straight from here without needing Airtable access. */}
       {canManageCatalog && (
         <Card title="Consumables catalog">

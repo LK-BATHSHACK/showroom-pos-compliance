@@ -62,7 +62,7 @@ export default async function ConsumablesPage() {
           rows={requests}
           catalog={catalog}
           canManageStatus={session.role === "Admin" || session.role === "Operations"}
-          canManageCatalog={session.role === "Admin"}
+          canManageCatalog={session.role === "Admin" || session.role === "Operations"}
         />
       ),
     });

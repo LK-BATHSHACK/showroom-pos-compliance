@@ -2,14 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireRole } from "@/lib/auth";
 import { createConsumableItem, updateConsumableItem, CONSUMABLE_CATEGORIES } from "@/lib/consumables";
 
-// Admin-only "Add item" flow (Lorraine, 10 Sep 2026: "allow admin to add in
-// more when needed with an add button") - adds straight to the live catalog,
-// no Airtable access needed. Deliberately Admin-only, matching the ask;
-// Operations (Chris) still fulfils requests but doesn't manage the catalog
-// itself - easy to widen to Operations too later if that turns out to be
-// wanted.
+// "Add item" flow (Lorraine, 10 Sep 2026: "allow admin to add in more when
+// needed with an add button") - adds straight to the live catalog, no Airtable
+// access needed. Admin and Operations (Chris) can manage the catalog - widened
+// to Operations 6 Oct 2026 ("can you give operations access to add these?").
 export async function POST(req: NextRequest) {
-  const session = await requireRole(["Admin"]);
+  const session = await requireRole(["Admin", "Operations"]);
   if (!session) return NextResponse.json({ error: "Forbidden." }, { status: 403 });
 
   try {
@@ -29,10 +27,10 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// Edit or remove an existing item (Admin only, same as adding). Remove is a
+// Edit or remove an existing item (Admin + Operations, same as adding). Remove is a
 // soft remove (Active = false) - see updateConsumableItem.
 export async function PATCH(req: NextRequest) {
-  const session = await requireRole(["Admin"]);
+  const session = await requireRole(["Admin", "Operations"]);
   if (!session) return NextResponse.json({ error: "Forbidden." }, { status: 403 });
 
   try {
