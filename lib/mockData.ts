@@ -374,6 +374,7 @@ type QSeed = {
   scopeSiteNames?: string[];
   rosterRole?: string;
   urgency?: "Digest" | "Immediate";
+  helpText?: string;
 };
 
 const hsQuestionSeed: QSeed[] = [
@@ -416,8 +417,26 @@ const hsQuestionSeed: QSeed[] = [
   { qnum: 49, section: "First Aid", order: 49, text: "Have any items of kit been used? (this should be recorded as an accident since last month)", answerType: "Yes/No", required: true },
   { qnum: 50, section: "First Aid", order: 50, text: "Report any issues here", answerType: "Long answer", options: "n/a if no issues" },
   { qnum: 51, section: "Mental Health First Aid", order: 51, text: "This poster is displayed on site (check the toilet doors, it may be there). Current MHFAs are Chris, Salli and Julia Kerr - please update the poster accordingly.", answerType: "Single choice", options: "I've had a new poster sent to me with the correct names on (Salli, Chris and Julia); I will print off a new version now (find it in the transport chat group on Teams); Missing poster - no printer on site, please send me one", required: true, rosterRole: "Mental Health First Aider" },
-  { qnum: 53, section: "Accidents, Incidents or Near Misses", order: 53, text: "Have any accidents/incidents or near misses happened in the last month? (check the accident/incident log or completed near miss sheets - STOP REPORT ACTION sheets)", answerType: "Single choice", options: "Yes - please upload a photo of any new and completed accident/incident/fire log or near miss book pages since the last checklist completion immediately to Salli; No", required: true, urgency: "Immediate" },
-  { qnum: 54, section: "Accidents, Incidents or Near Misses", order: 54, text: "How many Accidents, Incidents or Near Miss reports will you be emailing to Salli for this month?", answerType: "Single choice", options: "0; 1; 2; 3; More than 3", required: true, urgency: "Immediate" },
+  { qnum: 53, section: "Accidents, Incidents or Near Misses", order: 53, text: "Since the last checklist, have there been any accidents, incidents, near misses or fires (including unplanned fire alarm activations)? Check the accident book, incident log, fire log and near miss sheets for any new entries before answering.", answerType: "Single choice", options: "Yes; No", required: true, urgency: "Immediate", helpText: "Report anything serious to Zara or Salli at the time it happens. Don't wait for this checklist." },
+  { qnum: 54, section: "Accidents, Incidents or Near Misses", order: 54, text: "How many accidents, incidents, near misses or fires since the last checklist?", answerType: "Single choice", options: "1; 2; 3; 4; 5", required: true, urgency: "Immediate", helpText: "You'll be asked the same questions once for each one. This form takes up to 5 - if there were more, email the rest to hs@bathshack.com." },
+  // Per-incident block (Round 22) - repeated once per incident reported in Q54; see lib/hsIncidents.ts.
+  { qnum: 68, section: "Accidents, Incidents or Near Misses", order: 54.01, text: "What type was it?", answerType: "Single choice", options: "Accident (someone was hurt); Incident (no injury, but damage or a dangerous situation); Near miss (nothing happened, but it could have); Fire or fire alarm activation", required: true },
+  { qnum: 69, section: "Accidents, Incidents or Near Misses", order: 54.02, text: "Date it happened", answerType: "Date", required: true },
+  { qnum: 70, section: "Accidents, Incidents or Near Misses", order: 54.03, text: "Where did it happen?", answerType: "Single choice", options: "Showroom; Warehouse or stockroom; Yard, car park or loading area; Office or welfare area; Off site (delivery, customer's home, event); Other", required: true },
+  { qnum: 71, section: "Accidents, Incidents or Near Misses", order: 54.04, text: "Where did it happen? (you chose Other - please say where)", answerType: "Short answer", required: true },
+  { qnum: 72, section: "Accidents, Incidents or Near Misses", order: 54.05, text: "Who was involved? (tick all that apply)", answerType: "Multiple choice (checkboxes)", options: "Employee; Agency worker; Contractor; Customer; Visitor or member of the public; No one", required: true, helpText: "Please don't enter names here. Names go in the accident book or report only." },
+  { qnum: 73, section: "Accidents, Incidents or Near Misses", order: 54.06, text: "Briefly, what happened?", answerType: "Long answer", required: true, helpText: "Accident: what they were doing, what went wrong, and any injury. Near miss: what they were doing and what went wrong. Fire alarm activation: what happened, and is it resolved? No names, please." },
+  { qnum: 74, section: "Accidents, Incidents or Near Misses", order: 54.07, text: "Was anyone injured?", answerType: "Yes/No", required: true },
+  { qnum: 75, section: "Accidents, Incidents or Near Misses", order: 54.08, text: "What treatment was needed?", answerType: "Single choice", options: "None; First aid on site; Went to GP or minor injuries unit; Went to A&E or hospital; Ambulance called", required: true },
+  { qnum: 76, section: "Accidents, Incidents or Near Misses", order: 54.09, text: "Has the injured person been off work, or unable to do their normal job, because of this?", answerType: "Single choice", options: "No; Yes, less than 3 days; Yes, 3 days or more; Not yet known (still off)", required: true },
+  { qnum: 77, section: "Accidents, Incidents or Near Misses", order: 54.1, text: "Was the injured person taken from site to hospital?", answerType: "Single choice", options: "Yes; No; Don't know", required: true },
+  { qnum: 78, section: "Accidents, Incidents or Near Misses", order: 54.11, text: "Has the accident book entry been completed?", answerType: "Single choice", options: "Yes; No", required: true, helpText: "If No, please complete it today." },
+  { qnum: 79, section: "Accidents, Incidents or Near Misses", order: 54.12, text: "Did it involve any of the following? (tick all that apply)", answerType: "Multiple choice (checkboxes)", options: "Manual handling or lifting; Slip, trip or fall on the same level; Fall from height (ladder, steps, racking); Racking, shelving or display collapse; Vehicle, forklift or pallet truck; Falling or moving objects, including stock and glass; Sharp objects, cuts or broken sanitaryware; Electrical; Fire, smoke or gas; None of these", required: true },
+  { qnum: 80, section: "Accidents, Incidents or Near Misses", order: 54.13, text: "Has something similar happened before at this showroom?", answerType: "Single choice", options: "Yes; No; Not sure", required: true },
+  { qnum: 81, section: "Accidents, Incidents or Near Misses", order: 54.14, text: "What was done straight away to make it safe?", answerType: "Long answer", required: true },
+  { qnum: 82, section: "Accidents, Incidents or Near Misses", order: 54.15, text: "What evidence has been kept? (tick all that apply)", answerType: "Multiple choice (checkboxes)", options: "Photos of the scene; CCTV footage saved; Damaged item or equipment kept aside; Witness details noted; None", required: true, helpText: "CCTV can be overwritten within weeks. Save it now if there's any chance it's needed." },
+  { qnum: 83, section: "Accidents, Incidents or Near Misses", order: 54.16, text: "Have you started an investigation?", answerType: "Single choice", options: "Yes; No; Not sure", required: true, helpText: "You can request the full investigation template from Zara at any time, whatever you answer here." },
+  { qnum: 84, section: "Accidents, Incidents or Near Misses", order: 54.17, text: "Have you emailed a photo of the accident book, incident, fire log or near miss entry to hs@bathshack.com for our files?", answerType: "Single choice", options: "Yes - sent; Not yet - I will send it today", required: true, helpText: "Photograph only the relevant entry." },
   { qnum: 57, section: "Security", order: 57, text: "Report any issues here", answerType: "Long answer", options: "n/a if no issues" },
   { qnum: 58, section: "Security", order: 58, text: "Is the EMERGENCY CONTACTS poster displayed on your noticeboard? (NEW)", answerType: "Single choice", options: "Yes, and it has Julia, Ryan and Ruaidhri on; Yes, and it has Gavin, Ryan and Ruaidhri on; No, please email me a copy to print; No, I don't have a printer, please post me a copy; WAREHOUSE - Not Required", rosterRole: "Emergency Contact" },
   { qnum: 61, section: "And finally...", order: 61, text: "Have you added any new items to the Maintenance Task Planner this month? (we will check they have been logged and are under review; please be specific about what you've added if it's not obvious)", answerType: "Short answer" },
@@ -444,6 +463,7 @@ const hsTemplateQuestions: Rec[] = hsQuestionSeed.map((q) => ({
     ScopeSites: q.scopeSiteNames ? q.scopeSiteNames.map((n) => siteByName(n).id) : [],
     RosterRole: q.rosterRole || undefined,
     UrgencyClass: q.urgency || "Digest",
+    HelpText: q.helpText || undefined,
   },
 }));
 

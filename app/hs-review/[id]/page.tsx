@@ -4,6 +4,7 @@ import { requireRole } from "@/lib/auth";
 import { listRecords, getRecord, TABLES } from "@/lib/airtable";
 import { Card } from "@/components/ui";
 import DownloadSubmissionPdfButton from "@/components/DownloadSubmissionPdfButton";
+import { INCIDENT_REVIEW_ORDER } from "@/lib/hsIncidents";
 
 export const dynamic = "force-dynamic";
 
@@ -31,6 +32,7 @@ export default async function HSSubmissionDetailPage({ params }: { params: { id:
       Submission?: string[];
       TemplateQuestion?: string[];
       AnswerText?: string;
+      IncidentNumber?: number;
       Photo?: { id: string; filename: string; url?: string; size?: number; thumbnails?: { small?: { url: string } } }[];
     }>(TABLES.ANSWERS),
     listRecords<{ QuestionText: string; Section?: string; OrderIndex?: number; QuestionNumber?: number }>(TABLES.TEMPLATE_QUESTIONS),
@@ -45,10 +47,19 @@ export default async function HSSubmissionDetailPage({ params }: { params: { id:
       id: a.id,
       text: a.fields.AnswerText || "",
       photos: a.fields.Photo || [],
+      incident: a.fields.IncidentNumber ?? null,
       question: questionById[a.fields.TemplateQuestion?.[0] || ""],
     }))
     .filter((a) => a.question)
-    .sort((a, b) => (a.question.OrderIndex || 0) - (b.question.OrderIndex || 0));
+    // Per-incident answers (Round 22) sit together after Q54: incident 1's
+    // questions in order, then incident 2's, and so on.
+    .sort((a, b) => {
+      const ka = a.incident ? INCIDENT_REVIEW_ORDER : a.question.OrderIndex || 0;
+      const kb = b.incident ? INCIDENT_REVIEW_ORDER : b.question.OrderIndex || 0;
+      if (ka !== kb) return ka - kb;
+      if ((a.incident || 0) !== (b.incident || 0)) return (a.incident || 0) - (b.incident || 0);
+      return (a.question.OrderIndex || 0) - (b.question.OrderIndex || 0);
+    });
 
   const bySection = new Map<string, typeof answers>();
   answers.forEach((a) => {
@@ -63,7 +74,7 @@ export default async function HSSubmissionDetailPage({ params }: { params: { id:
     section,
     items: items.map((a) => ({
       qnum: a.question.QuestionNumber ?? null,
-      text: a.question.QuestionText,
+      text: `${a.incident ? `[Incident ${a.incident}] ` : ""}${a.question.QuestionText}`,
       answerText: a.text,
       hasPhotos: a.photos.length > 0,
     })),
@@ -90,8 +101,11 @@ export default async function HSSubmissionDetailPage({ params }: { params: { id:
       {Array.from(bySection.entries()).map(([section, items]) => (
         <div key={section} style={{ marginBottom: 20 }}>
           <Card title={section}>
-            {items.map((a) => (
+            {items.map((a, idx) => (
               <div key={a.id} style={{ marginBottom: 14, borderBottom: "1px solid #f2f2f2", paddingBottom: 10 }}>
+                {a.incident && a.incident !== items[idx - 1]?.incident && (
+                  <div style={{ fontSize: 14, fontWeight: 700, color: "#E6017E", margin: "6px 0 10px" }}>Incident {a.incident}</div>
+                )}
                 <div style={{ fontSize: 13, color: "#6E6E6E", marginBottom: 2 }}>
                   {a.question.QuestionNumber ? `Q${a.question.QuestionNumber}. ` : ""}{a.question.QuestionText}
                 </div>

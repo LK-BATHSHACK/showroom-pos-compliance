@@ -3,6 +3,15 @@
 import { useEffect, useMemo, useState } from "react";
 import { Card } from "@/components/ui";
 import { compressImages, shrinkToFit, postFormData, formatMB, MAX_TOTAL_UPLOAD_BYTES } from "@/lib/clientUpload";
+import {
+  ACCIDENTS_LEAD_QNUM,
+  INCIDENT_COUNT_QNUM,
+  MAX_INCIDENTS,
+  IQ,
+  isIncidentQnum,
+  incidentQuestionVisible,
+  incidentQuestionRequired,
+} from "@/lib/hsIncidents";
 
 type SiteOption = { id: string; name: string; siteType: string | null; region: string | null };
 
@@ -24,6 +33,7 @@ type TemplateQuestion = {
   options: string[];
   optionsRaw: string | null;
   required: boolean;
+  helpText?: string;
   referenceImages: { url: string; caption?: string }[];
 };
 
@@ -86,6 +96,10 @@ const CONDITIONAL_QUESTIONS: Record<number, { dependsOnQnum: number; showWhen: (
   // invisible?"). Also hidden if Q63 hasn't been answered at all yet, since
   // Q63 itself is optional.
   64: { dependsOnQnum: 63, showWhen: (a) => !!a && a !== "Not required" },
+  // Q54 "How many?" only makes sense if Q53 says there WAS an accident/
+  // incident/near miss/fire (Round 22) - and its answer sets how many
+  // incident blocks (Q68-Q84, repeated per incident) are shown below it.
+  54: { dependsOnQnum: 53, showWhen: (a) => a.startsWith("Yes") },
 };
 
 // Matrix questions (Fire Warden Duties, Warehouse material handling) each
@@ -119,6 +133,9 @@ export default function HSWalkaroundForm({
   const [matrixAnswers, setMatrixAnswers] = useState<Record<string, Record<string, string>>>({});
   const [multiAnswers, setMultiAnswers] = useState<Record<string, string[]>>({});
   const [fileAnswers, setFileAnswers] = useState<Record<string, File[]>>({});
+  // Accident/incident block (Q68-Q84), repeated once per incident:
+  // incidentNumber -> question number -> answer (multi-select joined "; ").
+  const [incidentAnswers, setIncidentAnswers] = useState<Record<number, Record<number, string>>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
   // >0 while photos are being shrunk in the browser - submit waits for it.
@@ -150,6 +167,7 @@ export default function HSWalkaroundForm({
         setMatrixAnswers({});
         setMultiAnswers({});
         setFileAnswers({});
+        setIncidentAnswers({});
         setResult(null);
         setCurrentSection(0);
       })
@@ -160,11 +178,24 @@ export default function HSWalkaroundForm({
     if (!questions) return [];
     const map = new Map<string, TemplateQuestion[]>();
     questions.forEach((q) => {
+      // Per-incident questions (Q68-Q84) aren't ordinary questions - they're
+      // rendered once per incident, under Q54, so keep them out of the flow.
+      if (isIncidentQnum(q.qnum)) return;
       if (!map.has(q.section)) map.set(q.section, []);
       map.get(q.section)!.push(q);
     });
     return Array.from(map.entries());
   }, [questions]);
+
+  // The per-incident question set, in display order. "Live" only once the
+  // questions actually exist in Airtable (so deploying the code before they
+  // are added just leaves the old Q53/Q54 behaviour in place).
+  const incidentQuestions = useMemo(
+    () => (questions || []).filter((q) => isIncidentQnum(q.qnum)).sort((a, b) => a.order - b.order),
+    [questions]
+  );
+  const incidentLive = incidentQuestions.some((q) => q.qnum === IQ.TYPE);
+  const totalQuestions = sections.reduce((n, [, qs]) => n + qs.length, 0);
 
   // Each section's [first, last] position in the whole scoped question set
   // (NOT the Airtable QuestionNumber, which is scoped-out-of-order by
@@ -207,6 +238,40 @@ export default function HSWalkaroundForm({
     // what makes it "branching" rather than just an always-optional field.
     if (q.qnum && CONDITIONAL_QUESTIONS[q.qnum]) return isVisible(q);
     return q.required;
+  }
+
+  // ---- Accident/incident block (Q68-Q84), repeated once per incident --------
+  // How many incident blocks to show: only when Q53 is "Yes" and Q54 has a
+  // number, capped at MAX_INCIDENTS.
+  const incidentCount = (() => {
+    if (!incidentLive || !answerForQnum(ACCIDENTS_LEAD_QNUM).startsWith("Yes")) return 0;
+    const n = parseInt(answerForQnum(INCIDENT_COUNT_QNUM), 10);
+    return Number.isFinite(n) ? Math.min(Math.max(n, 1), MAX_INCIDENTS) : 0;
+  })();
+
+  function incidentGetter(n: number) {
+    return (qn: number) => incidentAnswers[n]?.[qn] || "";
+  }
+
+  // Each incident's copy of a question needs its own id so radio groups,
+  // errors and scroll targets don't collide between incidents.
+  function incidentQuestion(q: TemplateQuestion, n: number): TemplateQuestion {
+    return { ...q, id: `${q.id}__inc${n}` };
+  }
+
+  function setIncidentValue(n: number, q: TemplateQuestion, value: string) {
+    setIncidentAnswers((prev) => ({ ...prev, [n]: { ...(prev[n] || {}), [q.qnum as number]: value } }));
+    setErrors((prev) => {
+      const next = { ...prev };
+      delete next[`${q.id}__inc${n}`];
+      return next;
+    });
+  }
+
+  function toggleIncidentMulti(n: number, q: TemplateQuestion, option: string, checked: boolean) {
+    const current = (incidentAnswers[n]?.[q.qnum as number] || "").split("; ").filter(Boolean);
+    const next = checked ? [...current, option] : current.filter((o) => o !== option);
+    setIncidentValue(n, q, next.join("; "));
   }
 
   function setAnswer(q: TemplateQuestion, value: string) {
@@ -283,6 +348,7 @@ export default function HSWalkaroundForm({
   function validate(qs: TemplateQuestion[]): Record<string, string> {
     const newErrors: Record<string, string> = {};
     qs.forEach((q) => {
+      if (isIncidentQnum(q.qnum)) return; // validated per incident below
       if (!isVisible(q)) return;
       if (q.answerType === "File upload") {
         if (errors[q.id]) newErrors[q.id] = errors[q.id];
@@ -292,6 +358,18 @@ export default function HSWalkaroundForm({
         newErrors[q.id] = "This is required.";
       }
     });
+    // Each incident's visible questions are all required. Checked whenever
+    // the section holding Q54 (or the whole form, at submit) is validated.
+    if (incidentCount > 0 && qs.some((q) => q.qnum === INCIDENT_COUNT_QNUM)) {
+      for (let n = 1; n <= incidentCount; n++) {
+        const get = incidentGetter(n);
+        incidentQuestions.forEach((q) => {
+          const qn = q.qnum as number;
+          if (!incidentQuestionVisible(qn, get)) return;
+          if (incidentQuestionRequired(qn, get) && !get(qn).trim()) newErrors[`${q.id}__inc${n}`] = "This is required.";
+        });
+      }
+    }
     return newErrors;
   }
 
@@ -305,7 +383,8 @@ export default function HSWalkaroundForm({
     const sectionErrors = validate(qs);
     if (Object.keys(sectionErrors).length > 0) {
       setErrors((prev) => ({ ...prev, ...sectionErrors }));
-      const firstId = qs.find((q) => sectionErrors[q.id])?.id;
+      // Falls back to an incident question's id (see incidentQuestion()).
+      const firstId = qs.find((q) => sectionErrors[q.id])?.id ?? Object.keys(sectionErrors)[0];
       if (firstId) setPendingScrollId(firstId);
       return;
     }
@@ -326,6 +405,11 @@ export default function HSWalkaroundForm({
           setCurrentSection(sectionIndex);
         }
         setPendingScrollId(firstErrorQ.id);
+      } else {
+        // Only an incident answer is missing - jump to the section holding Q54.
+        const sectionIndex = sections.findIndex(([, qs]) => qs.some((q) => q.qnum === INCIDENT_COUNT_QNUM));
+        if (sectionIndex >= 0 && sectionIndex !== currentSection) setCurrentSection(sectionIndex);
+        setPendingScrollId(Object.keys(newErrors)[0]);
       }
       return;
     }
@@ -335,9 +419,21 @@ export default function HSWalkaroundForm({
     // Hidden (branched-away) questions are still sent with whatever value
     // they hold (usually blank) - the server only persists answers to
     // questions it recognises as applicable, same as always.
+    // Incident questions are sent separately, once per incident, and only
+    // the ones visible for that incident (e.g. no treatment answer if
+    // "Was anyone injured?" is No).
+    const incidentPayload: { incidentNumber: number; questionId: string; value: string }[] = [];
+    for (let n = 1; n <= incidentCount; n++) {
+      const get = incidentGetter(n);
+      incidentQuestions.forEach((q) => {
+        const qn = q.qnum as number;
+        if (incidentQuestionVisible(qn, get) && get(qn).trim()) incidentPayload.push({ incidentNumber: n, questionId: q.id, value: get(qn).trim() });
+      });
+    }
     const payload = {
       siteId,
-      answers: questions.map((q) => ({ questionId: q.id, value: finalValueFor(q) })),
+      answers: questions.filter((q) => !isIncidentQnum(q.qnum)).map((q) => ({ questionId: q.id, value: finalValueFor(q) })),
+      incidentAnswers: incidentPayload,
     };
     const formData = new FormData();
     formData.set("payload", JSON.stringify(payload));
@@ -382,7 +478,9 @@ export default function HSWalkaroundForm({
         <ul style={{ color: "#333", fontSize: 14 }}>
           <li>{result.answersCreated} answers recorded</li>
           <li>{result.actionsCreated} action{result.actionsCreated === 1 ? "" : "s"} raised for follow-up</li>
+          {result.incidentsRecorded > 0 && <li>{result.incidentsRecorded} accident/incident/near miss report{result.incidentsRecorded === 1 ? "" : "s"} recorded</li>}
           {result.immediateEscalationSent && <li style={{ color: "#d03b3b", fontWeight: 600 }}>An accident/incident/near-miss escalation email was sent immediately.</li>}
+          {result.incidentsRecorded > 0 && <li>Remember to email a photo of each log entry to hs@bathshack.com (photograph only the relevant entry) and save any CCTV now.</li>}
           {result.photoUploadErrors?.length > 0 && (
             <li style={{ color: "#d03b3b" }}>
               {result.photoUploadErrors.length} photo{result.photoUploadErrors.length === 1 ? "" : "s"} didn't upload ({result.photoUploadErrors.join(", ")}) - everything else was recorded fine, but please email those photos directly as a backup.
@@ -445,7 +543,7 @@ export default function HSWalkaroundForm({
                 {questionRanges[currentSection][0] === questionRanges[currentSection][1]
                   ? questionRanges[currentSection][0]
                   : `${questionRanges[currentSection][0]}-${questionRanges[currentSection][1]}`}{" "}
-                of {questions?.length}
+                of {totalQuestions}
               </>
             )}
           </div>
@@ -469,21 +567,65 @@ export default function HSWalkaroundForm({
             {activeSection[1].map((q) => {
               if (!isVisible(q)) return null;
               return (
-                <QuestionField
-                  key={q.id}
-                  q={q}
-                  required={isRequired(q)}
-                  value={answers[q.id] || ""}
-                  matrixValue={matrixAnswers[q.id] || {}}
-                  multiValue={multiAnswers[q.id] || []}
-                  fileValue={fileAnswers[q.id] || []}
-                  error={errors[q.id]}
-                  onChange={(v) => setAnswer(q, v)}
-                  onMatrixChange={(sub, v) => setMatrixSub(q, sub, v)}
-                  onMultiToggle={(opt, checked) => toggleMulti(q, opt, checked)}
-                  onFilesChange={(fl) => setFiles(q, fl)}
-                  onFileRemove={(i) => removeFile(q, i)}
-                />
+                <div key={q.id}>
+                  <QuestionField
+                    q={q}
+                    required={isRequired(q)}
+                    value={answers[q.id] || ""}
+                    matrixValue={matrixAnswers[q.id] || {}}
+                    multiValue={multiAnswers[q.id] || []}
+                    fileValue={fileAnswers[q.id] || []}
+                    error={errors[q.id]}
+                    onChange={(v) => setAnswer(q, v)}
+                    onMatrixChange={(sub, v) => setMatrixSub(q, sub, v)}
+                    onMultiToggle={(opt, checked) => toggleMulti(q, opt, checked)}
+                    onFilesChange={(fl) => setFiles(q, fl)}
+                    onFileRemove={(i) => removeFile(q, i)}
+                  />
+                  {/* One block of incident questions (Q68-Q84) per incident, straight under "How many?" (Q54). */}
+                  {q.qnum === INCIDENT_COUNT_QNUM && incidentCount > 0 &&
+                    Array.from({ length: incidentCount }, (_, i) => i + 1).map((n) => {
+                      const get = incidentGetter(n);
+                      return (
+                        <div
+                          key={n}
+                          style={{ border: "1px solid #F3B3D5", background: "#FFF7FB", borderRadius: 10, padding: "16px 16px 0", margin: "0 0 22px" }}
+                        >
+                          <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 14, color: "#1D1C1D" }}>
+                            Incident {n} of {incidentCount}
+                          </div>
+                          {incidentQuestions.map((iq) => {
+                            const qn = iq.qnum as number;
+                            if (!incidentQuestionVisible(qn, get)) return null;
+                            const nq = incidentQuestion(iq, n);
+                            const value = get(qn);
+                            return (
+                              <QuestionField
+                                key={nq.id}
+                                q={nq}
+                                required={incidentQuestionRequired(qn, get)}
+                                value={value}
+                                matrixValue={{}}
+                                multiValue={value ? value.split("; ").filter(Boolean) : []}
+                                fileValue={[]}
+                                error={errors[nq.id]}
+                                onChange={(v) => setIncidentValue(n, iq, v)}
+                                onMatrixChange={() => {}}
+                                onMultiToggle={(opt, checked) => toggleIncidentMulti(n, iq, opt, checked)}
+                                onFilesChange={() => {}}
+                                onFileRemove={() => {}}
+                              />
+                            );
+                          })}
+                        </div>
+                      );
+                    })}
+                  {q.qnum === INCIDENT_COUNT_QNUM && incidentLive && answerForQnum(INCIDENT_COUNT_QNUM) === String(MAX_INCIDENTS) && (
+                    <div style={{ fontSize: 12, color: "#966400", background: "#FFF4E0", borderRadius: 6, padding: "8px 10px", margin: "-10px 0 18px" }}>
+                      This form takes up to {MAX_INCIDENTS} incidents. If there were more, fill in {MAX_INCIDENTS} here and email the rest to hs@bathshack.com.
+                    </div>
+                  )}
+                </div>
               );
             })}
           </Card>
@@ -724,6 +866,7 @@ function QuestionField({
   return (
     <div id={`q-${q.id}`} style={{ marginBottom: 22, paddingBottom: 4 }}>
       {label}
+      {q.helpText && <div style={{ fontSize: 12, color: "#6E6E6E", marginTop: -4, marginBottom: 8, whiteSpace: "pre-wrap" }}>{linkify(q.helpText)}</div>}
       {q.referenceImages.length > 0 && (
         // Bigger than before (110px -> 200px) so a poster's text is
         // actually readable without clicking through (Lorraine, 2 Sep

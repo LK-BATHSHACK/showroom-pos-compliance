@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
-import { submitHSWalkaround, type AnswerInput } from "@/lib/hsSubmission";
+import { submitHSWalkaround, type AnswerInput, type IncidentAnswerInput } from "@/lib/hsSubmission";
 import { MAX_ATTACHMENT_BYTES, type AttachmentUpload } from "@/lib/airtable";
 
 // Needs Buffer (base64-encoding uploaded photos for Airtable's attachment
@@ -24,6 +24,7 @@ export async function POST(req: NextRequest) {
 
   let siteId: string;
   let answers: AnswerInput[];
+  let incidentAnswers: IncidentAnswerInput[] = [];
   const files: Record<string, AttachmentUpload[]> = {};
 
   try {
@@ -37,6 +38,13 @@ export async function POST(req: NextRequest) {
     answers = payload.answers;
     if (!siteId || !Array.isArray(answers)) {
       return NextResponse.json({ error: "Missing siteId or answers." }, { status: 400 });
+    }
+    // Per-incident answers (accident/incident block repeated once per
+    // incident) - optional, only present when Q53 is "Yes".
+    if (Array.isArray(payload.incidentAnswers)) {
+      incidentAnswers = payload.incidentAnswers
+        .filter((a: any) => a && typeof a.questionId === "string" && Number.isInteger(a.incidentNumber))
+        .map((a: any) => ({ incidentNumber: a.incidentNumber, questionId: a.questionId, value: String(a.value ?? "") }));
     }
 
     for (const [key, value] of formData.entries()) {
@@ -68,6 +76,7 @@ export async function POST(req: NextRequest) {
       submittedByName: session.name,
       submittedByEmail: session.email,
       answers,
+      incidentAnswers,
       files,
       appHost: req.headers.get("host") || undefined,
     });

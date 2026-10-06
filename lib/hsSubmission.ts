@@ -10,6 +10,19 @@ import { listRecords, createRecords, uploadAttachment, TABLES, type AttachmentUp
 import { sendEmail, emailShell, BRAND } from "./resend";
 import { formatFlaggedIssue, formatFreeTextIssue, formatRosterIssue, formatUncertainIssue } from "./hsActionLabels";
 import { extraIssuesForAnswer } from "./hsIssueChecks";
+import {
+  ACCIDENTS_LEAD_QNUM,
+  INCIDENT_COUNT_QNUM,
+  MAX_INCIDENTS,
+  IQ,
+  isIncidentQnum,
+  incidentQuestionVisible,
+  incidentQuestionRequired,
+  incidentIssues,
+  incidentTypeLabel,
+  isSevere,
+  type IncidentGetter,
+} from "./hsIncidents";
 
 export type AnswerType =
   | "Short answer"
@@ -33,6 +46,9 @@ export type TemplateQuestion = {
   options: string[]; // parsed from OptionsNotes, semicolon-separated
   optionsRaw: string | null;
   required: boolean;
+  // Short grey help line shown under the question text (Template Questions'
+  // "HelpText" field, added Round 22 for the accident/incident questions).
+  helpText: string;
   scopeType: "AllSites" | "SiteType" | "NamedSites";
   scopeSiteType: string | null;
   scopeSiteNames: string[];
@@ -143,6 +159,7 @@ export async function fetchHSQuestions(): Promise<TemplateQuestion[]> {
       AnswerType?: string;
       OptionsNotes?: string;
       Required?: boolean;
+      HelpText?: string;
       ScopeType?: string;
       ScopeSiteType?: string;
       ScopeSites?: string[];
@@ -174,6 +191,7 @@ export async function fetchHSQuestions(): Promise<TemplateQuestion[]> {
       options: splitOptions(q.fields.OptionsNotes),
       optionsRaw: q.fields.OptionsNotes || null,
       required: !!q.fields.Required,
+      helpText: q.fields.HelpText || "",
       scopeType: (q.fields.ScopeType as any) || "AllSites",
       scopeSiteType: q.fields.ScopeSiteType || null,
       scopeSiteNames: (q.fields.ScopeSites || []).map((id) => siteNameById[id]).filter(Boolean),
@@ -359,11 +377,21 @@ export type AnswerInput = {
   value: string; // for Matrix, a JSON-stringified {subQuestion: answer} map; for Multiple choice, semicolon-joined selections
 };
 
+// One answer to one per-incident question (Q68-Q84) for incident number N.
+export type IncidentAnswerInput = {
+  incidentNumber: number;
+  questionId: string;
+  value: string;
+};
+
 export type SubmissionInput = {
   siteId: string;
   submittedByName: string;
   submittedByEmail: string;
   answers: AnswerInput[];
+  // Per-incident answers (Round 22) - the accident/incident block repeated
+  // once per incident reported in Q54. Optional; empty when Q53 is "No".
+  incidentAnswers?: IncidentAnswerInput[];
   // Photos for "File upload" questions (currently just Q62), keyed by
   // questionId, already base64-encoded by the API route from the multipart
   // upload. Optional - most submissions won't have any.
@@ -426,6 +454,21 @@ export async function submitHSWalkaround(input: SubmissionInput) {
 
   const today = new Date().toISOString().slice(0, 10);
 
+  // ---- Accident / incident block (Round 22) ---------------------------------
+  // Validated BEFORE anything is written, so a bad payload can't leave a
+  // half-created submission behind. "Live" = the per-incident questions exist
+  // in Airtable for this template; if they don't (e.g. the code is deployed
+  // before the questions are added) everything falls back to the old
+  // behaviour for Q53/Q54.
+  const questionByQnum = new Map<number, TemplateQuestion>();
+  applicableQuestions.forEach((q) => q.qnum && questionByQnum.set(q.qnum, q));
+  const incidentSectionLive = questionByQnum.has(IQ.TYPE);
+  const submittedValueByQnum = (qn: number): string => {
+    const q = questionByQnum.get(qn);
+    return q ? input.answers.find((a) => a.questionId === q.id)?.value || "" : "";
+  };
+  const incidents = incidentSectionLive ? buildIncidents(input, questionById, submittedValueByQnum) : [];
+
   const [submission] = await createRecords<any>(TABLES.SUBMISSIONS, [
     {
       SubmissionName: `${site.name} - H&S Walkaround - ${today}`,
@@ -440,8 +483,10 @@ export async function submitHSWalkaround(input: SubmissionInput) {
   ]);
 
   // Only persist answers to questions that are actually applicable to this
-  // site - protects against a stale client-side question list.
-  const validAnswers = input.answers.filter((a) => questionById.has(a.questionId));
+  // site - protects against a stale client-side question list. The per-
+  // incident questions are NOT saved here (the form doesn't send them as
+  // ordinary answers); they are saved once per incident further down.
+  const validAnswers = input.answers.filter((a) => questionById.has(a.questionId) && !(incidentSectionLive && isIncidentQnum(questionById.get(a.questionId)?.qnum)));
 
   const answerRecords = await createRecords<any>(
     TABLES.ANSWERS,
@@ -457,6 +502,7 @@ export async function submitHSWalkaround(input: SubmissionInput) {
   const actionsToCreate: Record<string, any>[] = [];
   const immediateHits: { question: TemplateQuestion; answer: string }[] = [];
   const photoUploadErrors: string[] = [];
+  let answersCreatedForIncidents = 0;
 
   // Answers keyed by question number, for the cross-question checks below
   // (Q16/Q17, Q23/Q24, Q49/Q53) that need to look at more than one answer
@@ -492,7 +538,11 @@ export async function submitHSWalkaround(input: SubmissionInput) {
     const q = questionById.get(a.questionId)!;
     const answerRecord = answerRecords[i];
 
-    if (q.urgency === "Immediate" && a.value && !a.value.startsWith("No") && a.value !== "0") {
+    // Q53/Q54 used to trigger the generic "immediate" email by themselves.
+    // Once the per-incident block is live, a dedicated incident email (with
+    // the real details of each incident) replaces that - see below.
+    const coveredByIncidentEmail = incidentSectionLive && (q.qnum === ACCIDENTS_LEAD_QNUM || q.qnum === INCIDENT_COUNT_QNUM);
+    if (!coveredByIncidentEmail && q.urgency === "Immediate" && a.value && !a.value.startsWith("No") && a.value !== "0") {
       immediateHits.push({ question: q, answer: a.value });
     }
 
@@ -705,8 +755,53 @@ export async function submitHSWalkaround(input: SubmissionInput) {
     });
   }
 
+  // Per-incident answers + actions (Round 22). One set of Answer records per
+  // incident, tagged with IncidentNumber so they stay grouped on the review
+  // page; each incident raises its own Action(s) - see lib/hsIncidents.ts.
+  if (incidents.length > 0) {
+    const incidentAnswerRows: { incidentNumber: number; qnum: number; questionId: string; value: string }[] = [];
+    incidents.forEach((inc) => {
+      inc.answers.forEach((a, qn) => incidentAnswerRows.push({ incidentNumber: inc.number, qnum: qn, questionId: a.questionId, value: a.value }));
+    });
+    const created = await createRecords<any>(
+      TABLES.ANSWERS,
+      incidentAnswerRows.map((r) => ({
+        AnswerName: `${site.name} - Q${r.qnum} - Incident ${r.incidentNumber}`,
+        Submission: [submission.id],
+        TemplateQuestion: [r.questionId],
+        AnswerText: r.value,
+        IncidentNumber: r.incidentNumber,
+      }))
+    );
+    const answerIdByIncidentQnum = new Map<string, string>();
+    incidentAnswerRows.forEach((r, i) => answerIdByIncidentQnum.set(`${r.incidentNumber}:${r.qnum}`, created[i].id));
+    answersCreatedForIncidents = created.length;
+
+    incidents.forEach((inc) => {
+      const get: IncidentGetter = (qn) => inc.answers.get(qn)?.value || "";
+      const sourceId = answerIdByIncidentQnum.get(`${inc.number}:${IQ.TYPE}`);
+      incidentIssues(inc.number, get).forEach((issue) => {
+        actionsToCreate.push({
+          Name: `${site.name} - ${issue.kind}`,
+          Status: "Open",
+          Site: [site.id],
+          SourceAnswer: sourceId ? [sourceId] : undefined,
+          IssueDescription: issue.description,
+          Priority: issue.priority,
+          OwnerName: input.submittedByName,
+          OwnerEmail: input.submittedByEmail,
+          DateIdentified: today,
+          UrgencyClass: issue.urgency,
+        });
+      });
+    });
+  }
+
   const createdActions = actionsToCreate.length ? await createRecords<any>(TABLES.ACTIONS, actionsToCreate) : [];
 
+  if (incidents.length > 0) {
+    await sendIncidentEscalation(site.name, input.submittedByName, input.submittedByEmail, incidents);
+  }
   if (immediateHits.length > 0) {
     await sendImmediateEscalation(site.name, input.submittedByName, input.submittedByEmail, immediateHits);
   }
@@ -720,11 +815,124 @@ export async function submitHSWalkaround(input: SubmissionInput) {
 
   return {
     submissionId: submission.id,
-    answersCreated: answerRecords.length,
+    answersCreated: answerRecords.length + answersCreatedForIncidents,
     actionsCreated: createdActions.length,
-    immediateEscalationSent: immediateHits.length > 0,
+    incidentsRecorded: incidents.length,
+    immediateEscalationSent: immediateHits.length > 0 || incidents.length > 0,
     photoUploadErrors,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Accident / incident block helpers (Round 22)
+// ---------------------------------------------------------------------------
+
+type ParsedIncident = { number: number; answers: Map<number, { questionId: string; value: string }> };
+
+/**
+ * Turns the submitted per-incident answers into one ParsedIncident per
+ * incident, and checks them: Q53 "Yes" needs at least one incident; the
+ * number of incidents must match Q54; and every question that is visible for
+ * that incident (given its own earlier answers) must be answered. Hidden
+ * questions' answers are dropped, so a changed-their-mind "Yes then No" on
+ * "Was anyone injured?" can't leave stale treatment answers behind.
+ * Throws a plain-English Error (shown to the user) if anything is missing.
+ */
+function buildIncidents(
+  input: SubmissionInput,
+  questionById: Map<string, TemplateQuestion>,
+  valueOfQnum: (qnum: number) => string
+): ParsedIncident[] {
+  const lead = valueOfQnum(ACCIDENTS_LEAD_QNUM);
+  if (!lead.startsWith("Yes")) return [];
+
+  const rawCount = parseInt(valueOfQnum(INCIDENT_COUNT_QNUM), 10);
+  const expected = Number.isFinite(rawCount) ? Math.min(Math.max(rawCount, 1), MAX_INCIDENTS) : 1;
+
+  const byNumber = new Map<number, Map<number, { questionId: string; value: string }>>();
+  (input.incidentAnswers || []).forEach((a) => {
+    const q = questionById.get(a.questionId);
+    if (!q?.qnum || !isIncidentQnum(q.qnum)) return;
+    if (!Number.isInteger(a.incidentNumber) || a.incidentNumber < 1 || a.incidentNumber > expected) return;
+    const value = (a.value || "").trim();
+    if (!byNumber.has(a.incidentNumber)) byNumber.set(a.incidentNumber, new Map());
+    byNumber.get(a.incidentNumber)!.set(q.qnum, { questionId: q.id, value });
+  });
+
+  const result: ParsedIncident[] = [];
+  for (let n = 1; n <= expected; n++) {
+    const answers = byNumber.get(n);
+    if (!answers) throw new Error(`Incident ${n} of ${expected} hasn't been filled in - please complete it, or change the number in Q${INCIDENT_COUNT_QNUM}.`);
+    const get: IncidentGetter = (qn) => answers.get(qn)?.value || "";
+    const kept = new Map<number, { questionId: string; value: string }>();
+    for (const qn of Array.from(answers.keys()).sort((a, b) => a - b)) {
+      if (!incidentQuestionVisible(qn, get)) continue;
+      kept.set(qn, answers.get(qn)!);
+    }
+    for (const qn of Object.values(IQ)) {
+      if (incidentQuestionRequired(qn, get) && !get(qn)) {
+        throw new Error(`Incident ${n}: Q${qn} still needs an answer.`);
+      }
+    }
+    result.push({ number: n, answers: kept });
+  }
+  return result;
+}
+
+async function sendIncidentEscalation(siteName: string, byName: string, byEmail: string, incidents: ParsedIncident[]) {
+  const to = await getHSNotifyEmails();
+  if (to.length === 0) {
+    console.warn("No H&S notify recipients found - skipping H&S incident escalation email.");
+    return;
+  }
+  const anySevere = incidents.some((inc) => isSevere((qn) => inc.answers.get(qn)?.value || ""));
+
+  const cards = incidents
+    .map((inc) => {
+      const get: IncidentGetter = (qn) => inc.answers.get(qn)?.value || "";
+      const severe = isSevere(get);
+      const notes: string[] = [];
+      if (get(IQ.INJURED) === "Yes" && get(IQ.BOOK) === "No") notes.push("Accident book entry NOT yet completed - asked to do it today.");
+      const inv = get(IQ.INVESTIGATION);
+      if (inv === "No" || inv === "Not sure") notes.push(`Investigation: ${inv === "No" ? "not started" : "not sure"}.`);
+      if (get(IQ.BEFORE) === "Yes" || get(IQ.BEFORE) === "Not sure") notes.push(`Similar incident before at this showroom: ${get(IQ.BEFORE)}.`);
+      if (get(IQ.EMAILED).startsWith("Not yet")) notes.push("Photo of the log entry not yet emailed to hs@bathshack.com.");
+      const row = (label: string, value: string) =>
+        value ? `<tr><td style="padding:4px 8px; color:${BRAND.grey}; width:34%; vertical-align:top;">${escapeHtml(label)}</td><td style="padding:4px 8px;">${escapeHtml(value)}</td></tr>` : "";
+      return `
+        <div style="border:1px solid ${severe ? "#d03b3b" : "#e5e5e5"}; border-radius:8px; padding:10px 12px; margin:12px 0;">
+          <div style="font-weight:600; margin-bottom:6px;">Incident ${inc.number}: ${escapeHtml(incidentTypeLabel(get))} - ${escapeHtml(get(IQ.DATE))}${severe ? ` <span style="color:#d03b3b;">(serious)</span>` : ""}</div>
+          <table style="width:100%; border-collapse:collapse; font-size:14px;">
+            ${row("Where", get(IQ.WHERE).startsWith("Other") && get(IQ.WHERE_OTHER) ? `Other - ${get(IQ.WHERE_OTHER)}` : get(IQ.WHERE))}
+            ${row("Who was involved", get(IQ.WHO))}
+            ${row("What happened", get(IQ.WHAT))}
+            ${row("Injured?", get(IQ.INJURED))}
+            ${row("Treatment", get(IQ.TREATMENT))}
+            ${row("Off work / unable to work", get(IQ.OFF_WORK))}
+            ${row("Taken to hospital", get(IQ.HOSPITAL))}
+            ${row("Accident book completed", get(IQ.BOOK))}
+            ${row("Involved", get(IQ.INVOLVED))}
+            ${row("Happened before here?", get(IQ.BEFORE))}
+            ${row("Made safe straight away", get(IQ.MADE_SAFE))}
+            ${row("Evidence kept", get(IQ.EVIDENCE))}
+            ${row("Investigation started?", get(IQ.INVESTIGATION))}
+            ${row("Log entry photo emailed?", get(IQ.EMAILED))}
+          </table>
+          ${notes.length ? `<ul style="margin:8px 0 0 18px; padding:0; font-size:13px; color:#d03b3b;">${notes.map((n) => `<li>${escapeHtml(n)}</li>`).join("")}</ul>` : ""}
+        </div>`;
+    })
+    .join("");
+
+  const body = `
+    <p><strong>${escapeHtml(siteName)}</strong> just submitted an H&S Check reporting ${incidents.length === 1 ? "1 accident, incident, near miss or fire" : `${incidents.length} accidents, incidents, near misses or fires`}.</p>
+    ${cards}
+    <p style="color:${BRAND.grey}; font-size:13px;">Submitted by ${escapeHtml(byName)} (${escapeHtml(byEmail)}). Names are deliberately not collected on the form - they belong in the accident book/report. Each incident has also been added to the Actions tracker.</p>
+  `;
+  await sendEmail(
+    to,
+    `${anySevere ? "SERIOUS - " : ""}H&S: ${incidents.length} accident/incident/near miss reported - ${siteName}`,
+    emailShell("Immediate H&S Escalation", body)
+  );
 }
 
 async function sendSubmissionSummaryEmail(
