@@ -35,7 +35,9 @@ export default function ConsumablesUpdateForm({
   const [packageCount, setPackageCount] = useState(existing?.packageCount ? String(existing.packageCount) : "");
   const [deliveryMethod, setDeliveryMethod] = useState(existing?.deliveryMethod || "");
   const [expectedDelivery, setExpectedDelivery] = useState(existing?.expectedDelivery || "");
-  const [message, setMessage] = useState(existing?.message || "");
+  // Message starts blank - each send is a new update added to the history
+  // (6 Oct 2026), so the last message isn't re-sent by accident.
+  const [message, setMessage] = useState("");
   const [photos, setPhotos] = useState<File[]>([]);
   const [preparing, setPreparing] = useState(false);
   const [sending, setSending] = useState(false);
@@ -136,8 +138,8 @@ export default function ConsumablesUpdateForm({
             ))}
           </div>
         )}
-        {existing?.photos.length && photos.length === 0 ? (
-          <div style={{ color: "#999", fontSize: 12, marginTop: 4 }}>The {existing.photos.length} photo(s) from the last update stay unless you add new ones.</div>
+        {existing ? (
+          <div style={{ color: "#999", fontSize: 12, marginTop: 4 }}>This is added as a new update - earlier updates and their photos are kept.</div>
         ) : null}
       </div>
       {!hasEmail && <div style={{ color: "#966400", fontSize: 12, marginBottom: 8 }}>No email address on this request - the update will be saved and shown in the app, but not emailed.</div>}
@@ -148,7 +150,7 @@ export default function ConsumablesUpdateForm({
           disabled={sending || preparing}
           style={{ background: "#E6017E", color: "#fff", border: "none", borderRadius: 6, padding: "9px 16px", fontWeight: 600, cursor: "pointer", opacity: sending || preparing ? 0.6 : 1 }}
         >
-          {sending ? "Sending..." : preparing ? "Preparing photos..." : existing ? "Send updated details" : "Send update & mark as Sent"}
+          {sending ? "Sending..." : preparing ? "Preparing photos..." : existing ? "Send another update" : "Send update & mark as Sent"}
         </button>
         <button type="button" onClick={onCancel} style={{ background: "none", border: "1px solid #ddd", borderRadius: 6, padding: "8px 14px", cursor: "pointer" }}>
           Cancel

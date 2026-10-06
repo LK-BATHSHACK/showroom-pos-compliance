@@ -29,6 +29,14 @@
 // app/api/consumables-request/route.ts via getOpenConsumablesRequestsForSite,
 // and the Submit tab swaps the form for the open order + "Mark as received".
 //
+// Update history (6 Oct 2026, Lorraine: "you can only leave one note, it
+// overrides your previous note. any chance the history of that can stay?"):
+// every delivery update is now also saved as its own row in the
+// "Consumables Updates" table (linked to the request), and the request shows
+// all of them, newest first. The request's own Update* fields still hold the
+// latest update (the reminder emails read those), so nothing else changed.
+// Updates sent before this existed were copied into the new table once.
+//
 // Catalog management (added 10 Sep 2026, Lorraine: "allow admin to add in
 // more when needed with an add button") - Admin can add a new catalog item
 // straight from the Dashboard tab (see ConsumablesDashboard.tsx and
@@ -86,7 +94,10 @@ export type ConsumablesRequestRow = {
   statusUpdatedByName: string | null;
   notes: string | null;
   lines: ConsumablesRequestLine[];
+  /** Latest delivery update (same as the last entry of `updates`). */
   update: ConsumablesUpdate | null;
+  /** Every delivery update sent for this request, oldest first. */
+  updates: ConsumablesUpdate[];
   receivedByName: string | null;
   receivedDate: string | null;
 };
@@ -138,6 +149,51 @@ function updateFromFields(f: RequestFields): ConsumablesUpdate | null {
   };
 }
 
+type UpdateFields = {
+  Request?: string[];
+  Message?: string;
+  DeliveryMethod?: string;
+  ExpectedDelivery?: string;
+  PackageCount?: number;
+  Photos?: { url?: string; filename?: string; thumbnails?: { large?: { url: string } } }[];
+  SentByName?: string;
+  SentDate?: string;
+};
+
+function updateFromHistory(f: UpdateFields): ConsumablesUpdate {
+  return {
+    message: f.Message || null,
+    deliveryMethod: f.DeliveryMethod || null,
+    expectedDelivery: f.ExpectedDelivery || null,
+    packageCount: typeof f.PackageCount === "number" ? f.PackageCount : null,
+    photos: (f.Photos || [])
+      .filter((p) => p.url)
+      .map((p) => ({ url: p.url as string, thumbUrl: p.thumbnails?.large?.url || (p.url as string), filename: p.filename || "photo.jpg" })),
+    sentByName: f.SentByName || null,
+    sentDate: f.SentDate || null,
+  };
+}
+
+/** All delivery updates grouped by request id, oldest first. Returns an empty map (not an error) if the history table can't be read, so the page still loads and falls back to the latest update on the request itself. */
+async function fetchUpdatesByRequestId(): Promise<Map<string, ConsumablesUpdate[]>> {
+  const byRequest = new Map<string, { created: string; update: ConsumablesUpdate }[]>();
+  try {
+    const recs = await listRecords<UpdateFields>(TABLES.CONSUMABLES_UPDATES);
+    recs.forEach((r) => {
+      const requestId = r.fields.Request?.[0];
+      if (!requestId) return;
+      const list = byRequest.get(requestId) || [];
+      list.push({ created: `${r.fields.SentDate || ""}|${r.createdTime || ""}`, update: updateFromHistory(r.fields) });
+      byRequest.set(requestId, list);
+    });
+  } catch (err) {
+    console.error("Couldn't read Consumables Updates history", err);
+  }
+  const out = new Map<string, ConsumablesUpdate[]>();
+  byRequest.forEach((list, id) => out.set(id, list.sort((a, b) => a.created.localeCompare(b.created)).map((x) => x.update)));
+  return out;
+}
+
 export async function fetchConsumableCatalog(): Promise<ConsumableItem[]> {
   const records = await listRecords<{ Name: string; Category?: string; Unit?: string; Active?: boolean }>(
     TABLES.CONSUMABLE_ITEMS
@@ -156,11 +212,12 @@ export async function fetchConsumableCatalog(): Promise<ConsumableItem[]> {
 
 /** Fetches every Consumables Request with its line items joined in, newest first. Used by the dashboard - no date-range param, the dashboard filters client-side so KPIs can react instantly without a re-fetch. */
 export async function fetchConsumablesRequests(): Promise<ConsumablesRequestRow[]> {
-  const [requests, lines, items, sites] = await Promise.all([
+  const [requests, lines, items, sites, updatesByRequestId] = await Promise.all([
     listRecords<RequestFields>(TABLES.CONSUMABLES_REQUESTS, { sort: [{ field: "DateRequested", direction: "desc" }] }),
     listRecords<{ Request?: string[]; Item?: string[]; Quantity?: number; Notes?: string }>(TABLES.CONSUMABLES_REQUEST_LINES),
     listRecords<{ Name: string }>(TABLES.CONSUMABLE_ITEMS),
     listRecords<{ SiteName: string }>(TABLES.SITES),
+    fetchUpdatesByRequestId(),
   ]);
 
   const itemNameById = new Map(items.map((i) => [i.id, i.fields.Name]));
@@ -185,6 +242,9 @@ export async function fetchConsumablesRequests(): Promise<ConsumablesRequestRow[
 
   return requests.map((r) => {
     const siteId = r.fields.Site?.[0] || null;
+    const history = updatesByRequestId.get(r.id) || [];
+    const latestOnRequest = updateFromFields(r.fields);
+    const updates = history.length ? history : latestOnRequest ? [latestOnRequest] : [];
     return {
       id: r.id,
       siteId,
@@ -197,7 +257,8 @@ export async function fetchConsumablesRequests(): Promise<ConsumablesRequestRow[
       statusUpdatedByName: r.fields.StatusUpdatedByName || null,
       notes: r.fields.Notes || null,
       lines: linesByRequestId.get(r.id) || [],
-      update: updateFromFields(r.fields),
+      update: updates.length ? updates[updates.length - 1] : null,
+      updates,
       receivedByName: r.fields.ReceivedByName || null,
       receivedDate: r.fields.ReceivedDate || null,
     };
@@ -362,10 +423,12 @@ function escapeHtml(s: string): string {
  * image covering how many packages they are getting ... and roughly when and
  * how e.g. 'on van drop for next week' or 'arriving by DPD next day'").
  *
- * Saves the update on the request, replaces any earlier update photos, moves
- * the request to "Sent" (unless it's already Fulfilled), and emails the
- * person who made the request with the details and the photos attached.
- * Sending again overwrites the previous update and emails again.
+ * Saves the update as a new row in Consumables Updates (with its photos), so
+ * earlier updates are kept (6 Oct 2026). Also copies it onto the request as
+ * the latest update, moves the request to "Sent" (unless it's already
+ * Fulfilled), and emails the person who made the request with the details
+ * and the photos attached. If the history row can't be created, the photos
+ * go on the request instead (the old behaviour), so nothing is lost.
  */
 export async function sendConsumablesUpdate(input: {
   id: string;
@@ -389,18 +452,45 @@ export async function sendConsumablesUpdate(input: {
     UpdateSentByName: input.sentByName,
     UpdateSentDate: today,
   };
-  if (input.photos.length) fields.UpdatePhotos = []; // new photos replace the old ones
   if (currentStatus !== "Fulfilled") {
     fields.Status = "Sent";
     fields.StatusUpdatedDate = today;
     fields.StatusUpdatedByName = input.sentByName;
   }
+  const isFollowUp = !!(existing.fields.UpdateSentDate || existing.fields.UpdateMessage);
+
+  // History row first - this is where the photos live from now on.
+  let historyId: string | null = null;
+  try {
+    const [created] = await createRecords(TABLES.CONSUMABLES_UPDATES, [
+      {
+        Name: `${existing.fields.Name || "Request"} - update ${today}`,
+        Request: [input.id],
+        Message: input.message,
+        DeliveryMethod: input.deliveryMethod || null,
+        ExpectedDelivery: input.expectedDelivery,
+        PackageCount: input.packageCount,
+        SentByName: input.sentByName,
+        SentDate: today,
+      } as Record<string, any>,
+    ]);
+    historyId = created?.id || null;
+  } catch (err) {
+    console.error("Couldn't save update history - falling back to the request only", err);
+  }
+
+  // The request keeps a copy of the latest update. Its old photos are
+  // cleared when there's a history row (they're kept on that request's
+  // earlier history row instead); without one, new photos replace them as
+  // before.
+  if (historyId || input.photos.length) fields.UpdatePhotos = [];
   await updateRecords(TABLES.CONSUMABLES_REQUESTS, [{ id: input.id, fields }]);
 
   const photoUploadErrors: string[] = [];
   for (const p of input.photos) {
     try {
-      await uploadAttachment(input.id, "UpdatePhotos", p);
+      if (historyId) await uploadAttachment(historyId, "Photos", p);
+      else await uploadAttachment(input.id, "UpdatePhotos", p);
     } catch (err) {
       console.error(err);
       photoUploadErrors.push(p.filename);
@@ -421,11 +511,11 @@ export async function sendConsumablesUpdate(input: {
     : "";
   await sendEmail(
     to,
-    `Your consumables order is on its way - ${siteName}`,
+    isFollowUp ? `Update on your consumables order - ${siteName}` : `Your consumables order is on its way - ${siteName}`,
     emailShell(
       "Consumables Update",
       `<p>Hi ${escapeHtml(firstName)},</p>
-       <p>Your consumables request from ${existing.fields.DateRequested || "recently"} has been sent.</p>
+       <p>${isFollowUp ? `Here's an update on your consumables request from ${existing.fields.DateRequested || "recently"}.` : `Your consumables request from ${existing.fields.DateRequested || "recently"} has been sent.`}</p>
        ${rows.length ? `<p>${rows.join("<br/>")}</p>` : ""}
        ${input.message ? `<p>${escapeHtml(input.message).replace(/\n/g, "<br/>")}</p>` : ""}
        ${input.photos.length ? `<p style="color:${BRAND.grey}; font-size:13px;">Photo${input.photos.length === 1 ? "" : "s"} of what's coming attached, so you can check it's all there if the driver drops it off.</p>` : ""}

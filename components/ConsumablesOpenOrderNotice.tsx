@@ -3,7 +3,8 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Card } from "@/components/ui";
-import ConsumablesUpdateSummary, { type UpdateView } from "@/components/ConsumablesUpdateSummary";
+import type { UpdateView } from "@/components/ConsumablesUpdateSummary";
+import ConsumablesUpdateHistory from "@/components/ConsumablesUpdateHistory";
 
 type Row = {
   id: string;
@@ -11,6 +12,7 @@ type Row = {
   status: string;
   lines: { id: string; itemName: string; quantity: number }[];
   update: UpdateView | null;
+  updates: UpdateView[];
 };
 
 // Shown to a Store Manager INSTEAD of the request form while their site has
@@ -82,7 +84,7 @@ export default function ConsumablesOpenOrderNotice({ rows }: { rows: Row[] }) {
                   </div>
                 ))}
               </div>
-              {r.update && <ConsumablesUpdateSummary update={r.update} />}
+              <ConsumablesUpdateHistory updates={r.updates} />
               <p style={{ color: "#6E6E6E", fontSize: 13, margin: "8px 0" }}>
                 {sent
                   ? "Chris has sent this. Once it arrives, tap the button below."

@@ -232,4 +232,7 @@ export const TABLES = {
   CONSUMABLE_ITEMS: "Consumable Items",
   CONSUMABLES_REQUESTS: "Consumables Requests",
   CONSUMABLES_REQUEST_LINES: "Consumables Request Lines",
+  // One row per delivery update Chris/Operations sends (added 6 Oct 2026 so
+  // earlier updates are kept, not overwritten - see sendConsumablesUpdate).
+  CONSUMABLES_UPDATES: "Consumables Updates",
 } as const;

@@ -757,6 +757,7 @@ const store: Record<string, Rec[]> = {
   [TABLES.CONSUMABLE_ITEMS]: consumableItems,
   [TABLES.CONSUMABLES_REQUESTS]: consumablesRequests,
   [TABLES.CONSUMABLES_REQUEST_LINES]: consumablesRequestLines,
+  [TABLES.CONSUMABLES_UPDATES]: [],
 };
 
 function tablePrefix(table: string) {

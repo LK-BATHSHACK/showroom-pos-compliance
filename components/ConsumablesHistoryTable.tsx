@@ -3,7 +3,8 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Card } from "@/components/ui";
-import ConsumablesUpdateSummary, { type UpdateView } from "@/components/ConsumablesUpdateSummary";
+import type { UpdateView } from "@/components/ConsumablesUpdateSummary";
+import ConsumablesUpdateHistory from "@/components/ConsumablesUpdateHistory";
 
 type Line = { id: string; itemName: string; quantity: number; notes: string | null };
 type Row = {
@@ -13,6 +14,7 @@ type Row = {
   notes: string | null;
   lines: Line[];
   update: UpdateView | null;
+  updates: UpdateView[];
   receivedByName: string | null;
   receivedDate: string | null;
 };
@@ -83,7 +85,7 @@ export default function ConsumablesHistoryTable({ rows }: { rows: Row[] }) {
                 </td>
                 <td style={{ color: "#6E6E6E", fontSize: 13 }}>
                   {r.notes || (r.update ? null : "-")}
-                  {r.update && <ConsumablesUpdateSummary update={r.update} />}
+                  <ConsumablesUpdateHistory updates={r.updates} />
                 </td>
                 <td>
                   <span style={{ background: style.bg, color: style.fg, fontSize: 12, fontWeight: 600, padding: "2px 10px", borderRadius: 999 }}>

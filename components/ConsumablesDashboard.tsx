@@ -3,7 +3,8 @@
 import { Fragment, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Card, KpiCard } from "@/components/ui";
-import ConsumablesUpdateSummary, { type UpdateView } from "@/components/ConsumablesUpdateSummary";
+import type { UpdateView } from "@/components/ConsumablesUpdateSummary";
+import ConsumablesUpdateHistory from "@/components/ConsumablesUpdateHistory";
 import ConsumablesUpdateForm from "@/components/ConsumablesUpdateForm";
 
 type Line = { id: string; itemId: string | null; itemName: string; quantity: number; notes: string | null };
@@ -20,6 +21,7 @@ type Row = {
   notes: string | null;
   lines: Line[];
   update: UpdateView | null;
+  updates: UpdateView[];
   receivedByName: string | null;
   receivedDate: string | null;
 };
@@ -491,7 +493,7 @@ export default function ConsumablesDashboard({
                   </td>
                   <td style={{ color: "#6E6E6E", fontSize: 13 }}>
                     {r.notes || "-"}
-                    {r.update && <ConsumablesUpdateSummary update={r.update} />}
+                    <ConsumablesUpdateHistory updates={r.updates} />
                   </td>
                   <td>
                     {canManageStatus ? (
@@ -532,7 +534,7 @@ export default function ConsumablesDashboard({
                         }}
                         style={{ display: "block", marginTop: 6, background: "none", border: "1px solid #E6017E", color: "#E6017E", borderRadius: 6, padding: "4px 10px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}
                       >
-                        {r.update ? "Edit update" : "Send update"}
+                        {r.update ? "Send another update" : "Send update"}
                       </button>
                     )}
                   </td>
