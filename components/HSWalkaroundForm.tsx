@@ -100,6 +100,10 @@ const CONDITIONAL_QUESTIONS: Record<number, { dependsOnQnum: number; showWhen: (
   // incident/near miss/fire (Round 22) - and its answer sets how many
   // incident blocks (Q68-Q84, repeated per incident) are shown below it.
   54: { dependsOnQnum: 53, showWhen: (a) => a.startsWith("Yes") },
+  // Q85 "What have you added?" only appears when Q61 (now a Yes/No) says
+  // something new WAS added to the Maintenance Task Planner (Lorraine, 7 Oct
+  // 2026: Q61 used to be free text, so "no"/"nothing" was raising an action).
+  85: { dependsOnQnum: 61, showWhen: (a) => a === "Yes" },
 };
 
 // Matrix questions (Fire Warden Duties, Warehouse material handling) each
@@ -110,12 +114,23 @@ const CONDITIONAL_QUESTIONS: Record<number, { dependsOnQnum: number; showWhen: (
 // problem in Q9?", 2 Sep 2026). Q5 (Warehouse) -> Q9, Q35 (Fire Warden) ->
 // Q40 - both are that section's own catch-all, same pattern, just two
 // different question numbers because they're in different sections.
-const MATRIX_ISSUE_POINTER: Record<number, number> = { 5: 9, 35: 40 };
+const MATRIX_ISSUE_POINTER: Record<number, number> = { 5: 9, 35: 40, 46: 50 };
+
+// Answer options per matrix row. Q5/Q35 keep Yes/No/Covered elsewhere; Q46
+// (First Aid) is a plain Yes/No per line (Lorraine, 7 Oct 2026 - it used to
+// be tick boxes, and stores missed that the long statements were tickable,
+// so unticked boxes raised actions for things that were actually fine).
+const DEFAULT_MATRIX_OPTIONS = ["Yes", "No", "Covered elsewhere"];
+const MATRIX_OPTIONS: Record<number, string[]> = { 46: ["Yes", "No"] };
+
+// Matrix questions where every row must be answered before the section can
+// be submitted (otherwise a skipped row would never be flagged).
+const MATRIX_ALL_ROWS_REQUIRED = new Set([46]);
 
 // "Tick to confirm" checkbox questions - anything left unticked is raised as
-// an action (lib/hsIssueChecks.ts). Chloe left Q46's poster box unticked
-// thinking that covered it (Lorraine, 25 Sep 2026), so say so on the form.
-const TICK_TO_CONFIRM_QNUMS = new Set([12, 46]);
+// an action (lib/hsIssueChecks.ts). Q46 was here until 7 Oct 2026 - now a
+// Yes/No matrix instead (see MATRIX_OPTIONS).
+const TICK_TO_CONFIRM_QNUMS = new Set([12]);
 
 export default function HSWalkaroundForm({
   sites,
@@ -356,6 +371,14 @@ export default function HSWalkaroundForm({
       }
       if (isRequired(q) && !finalValueFor(q).trim()) {
         newErrors[q.id] = "This is required.";
+      } else if (
+        q.answerType === "Matrix" &&
+        q.qnum &&
+        MATRIX_ALL_ROWS_REQUIRED.has(q.qnum) &&
+        isRequired(q) &&
+        q.options.some((sub) => !(matrixAnswers[q.id] || {})[sub])
+      ) {
+        newErrors[q.id] = "Please answer Yes or No for every line.";
       }
     });
     // Each incident's visible questions are all required. Checked whenever
@@ -799,7 +822,7 @@ function QuestionField({
             <div key={sub} style={{ borderBottom: "1px solid #f2f2f2", paddingBottom: 10 }}>
               <div style={{ fontSize: 13, marginBottom: 6 }}>{sub}</div>
               <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
-                {["Yes", "No", "Covered elsewhere"].map((opt) => (
+                {((q.qnum && MATRIX_OPTIONS[q.qnum]) || DEFAULT_MATRIX_OPTIONS).map((opt) => (
                   <label key={opt} style={radioLabelStyle}>
                     <input
                       type="radio"

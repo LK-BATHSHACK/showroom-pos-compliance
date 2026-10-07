@@ -16,8 +16,9 @@
 //   2. Matrix questions (Q5 warehouse, Q35 Fire Warden Duties): every row
 //      answered "No" is its own issue, whether or not the follow-up box
 //      was filled in.
-//   3. "Tick to confirm" checkbox questions (Q12 staff awareness, Q46 first
-//      aid): every option left unticked is an issue. Q56 (cash handling) is
+//   3. "Tick to confirm" checkbox questions (Q12 staff awareness): every
+//      option left unticked is an issue. (Q46 first aid was here until 7 Oct
+//      2026 - it's now a Yes/No matrix, so rule 2 flags each "No" instead.) Q56 (cash handling) is
 //      deliberately NOT included - its options are alternatives ("No cash
 //      is used" vs "cash is held in a safe"), so leaving some unticked is
 //      normal.
@@ -99,14 +100,16 @@ const OPTION_FLAGS: Record<number, { values: string[]; description: string; prio
 
 // ---- 3. Tick-to-confirm checkboxes ---------------------------------------
 
-export const TICK_TO_CONFIRM_QNUMS = new Set([12, 46]);
+export const TICK_TO_CONFIRM_QNUMS = new Set([12]);
 
 // ---- 5. Free text ----------------------------------------------------------
 
 // The form's own "report any issues here" boxes - these already raise an
 // action for ANY text (ISSUE_FIELD_QUESTION_NUMBERS in hsSubmission.ts), so
 // the keyword check below skips them to avoid a duplicate.
-export const ISSUE_FIELD_QNUMS = new Set([4, 9, 13, 15, 17, 26, 40, 50, 57, 61]);
+// Q61 replaced by Q85 on 7 Oct 2026 (Q61 is now Yes/No; Q85 is the "what
+// did you add" box shown only on Yes).
+export const ISSUE_FIELD_QNUMS = new Set([4, 9, 13, 15, 17, 26, 40, 50, 57, 85]);
 
 // Free-text questions where the answer is a name/place and a keyword can't
 // mean an issue, plus Q24/Q64 (handled elsewhere). Q34 is handled

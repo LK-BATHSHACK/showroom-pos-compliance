@@ -283,11 +283,18 @@ const ROSTER_CHECKS: Record<number, (answer: string, site: SiteOption) => Roster
 // on the H&S Review page for Salli/Marketing/Admin to act on by hand.
 // ---------------------------------------------------------------------------
 
-const ISSUE_FIELD_QUESTION_NUMBERS = new Set([4, 9, 13, 15, 17, 26, 40, 50, 57, 61]);
+// Q61 (Maintenance Task Planner) was a free-text box here until 7 Oct 2026 -
+// "no"/"nothing" raised an action. Q61 is now Yes/No, and Q85 ("What have
+// you added?", only shown on Yes) is the box that raises the action.
+const ISSUE_FIELD_QUESTION_NUMBERS = new Set([4, 9, 13, 15, 17, 26, 40, 50, 57, 85]);
 
+// Blank, "n/a", or a plain "no"/"nothing"/"none" style answer - nothing to
+// report (Lorraine, 7 Oct 2026: "no" typed into an issue box was being
+// raised as an issue).
 function isBlankOrNA(text: string): boolean {
   const t = text.trim().toLowerCase();
-  return t === "" || t === "n/a" || t === "na" || t === "none";
+  if (t === "" || t === "na") return true;
+  return /^(no|nope|none|nothing|nothing to report|no issues?|n\/?a|not (needed|required|applicable)|all good)[\s.!]*$/.test(t);
 }
 
 // ---------------------------------------------------------------------------

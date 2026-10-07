@@ -40,6 +40,7 @@ export const HS_QUESTION_SECTIONS: Record<number, string> = {
   50: "First Aid",
   57: "Security",
   61: "Maintenance Task Planner",
+  85: "Maintenance Task Planner",
 };
 
 // For a flagged Single choice / quantity-style answer, where the option
