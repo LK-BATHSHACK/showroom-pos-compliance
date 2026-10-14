@@ -10,6 +10,7 @@ import { listRecords, createRecords, uploadAttachment, TABLES, type AttachmentUp
 import { sendEmail, emailShell, BRAND } from "./resend";
 import { formatFlaggedIssue, formatFreeTextIssue, formatRosterIssue, formatUncertainIssue } from "./hsActionLabels";
 import { extraIssuesForAnswer } from "./hsIssueChecks";
+import { effectiveHSVersion, type HSVersion } from "./siteConfig";
 import {
   ACCIDENTS_LEAD_QNUM,
   INCIDENT_COUNT_QNUM,
@@ -109,6 +110,8 @@ export type SiteOption = {
   siteType: string | null;
   region: "NI" | "ROI" | "GB" | null;
   hsApplies: boolean;
+  /** Which version of the H&S check this site fills out (Sites."H&SVersion", set on the Stores admin page - Round 26). */
+  hsVersion: HSVersion;
 };
 
 export type RosterRow = {
@@ -134,15 +137,19 @@ function splitOptions(raw: string | null | undefined): string[] {
 }
 
 export async function fetchSites(): Promise<SiteOption[]> {
-  const records = await listRecords<{ SiteName: string; SiteType?: string; Region?: string; Active?: boolean; "H&SChecklistApplies"?: boolean }>(TABLES.SITES);
+  const records = await listRecords<{ SiteName: string; SiteType?: string; Region?: string; Active?: boolean; "H&SChecklistApplies"?: boolean; "H&SVersion"?: string }>(TABLES.SITES);
   return records
-    .filter((r) => r.fields.Active !== false)
+    // `=== true`, not `!== false`: an unticked Airtable checkbox is absent,
+    // not false - so a store switched off on the Stores page would otherwise
+    // still show up everywhere (Round 26).
+    .filter((r) => r.fields.Active === true)
     .map((r) => ({
       id: r.id,
       name: r.fields.SiteName,
       siteType: r.fields.SiteType || null,
       region: (r.fields.Region as any) || null,
       hsApplies: r.fields["H&SChecklistApplies"] === true,
+      hsVersion: effectiveHSVersion(r.fields["H&SVersion"], r.fields.SiteType),
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
 }
@@ -206,7 +213,14 @@ export async function fetchHSQuestions(): Promise<TemplateQuestion[]> {
 export function scopeQuestionsForSite(questions: TemplateQuestion[], site: SiteOption): TemplateQuestion[] {
   return questions.filter((q) => {
     if (q.scopeType === "AllSites") return true;
-    if (q.scopeType === "SiteType") return q.scopeSiteType === site.siteType;
+    if (q.scopeType === "SiteType") {
+      // Showroom/Warehouse-scoped questions follow the site's H&S version
+      // (Stores admin, Round 26) rather than its type - so e.g. Cookstown
+      // Clearance Outlet can do the warehouse version. Any other site-type
+      // scope still matches on the type itself.
+      if (q.scopeSiteType === "Warehouse" || q.scopeSiteType === "Showroom") return q.scopeSiteType === site.hsVersion;
+      return q.scopeSiteType === site.siteType;
+    }
     if (q.scopeType === "NamedSites") return q.scopeSiteNames.includes(site.name);
     return true;
   });
@@ -451,6 +465,7 @@ export async function submitHSWalkaround(input: SubmissionInput) {
 
   const site = sites.find((s) => s.id === input.siteId);
   if (!site) throw new Error("Unknown site.");
+  if (!site.hsApplies) throw new Error("H&S checks aren't set up for this store - an Admin can switch them on in Stores.");
   const hsTemplate = templates.find((t) => t.fields.TemplateName === HS_TEMPLATE_NAME);
   if (!hsTemplate) throw new Error(`Checklist Template "${HS_TEMPLATE_NAME}" not found.`);
 

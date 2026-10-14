@@ -72,7 +72,7 @@ async function fetchStoreManagerTargets(): Promise<ManagerTarget[]> {
     // Airtable omits unticked checkboxes, so only an explicit `true` counts (same rule as login).
     if (u.fields.Role !== "Store Manager" || u.fields.Active !== true || !u.fields.Email) continue;
     const site = u.fields.Site?.[0] ? siteById.get(u.fields.Site[0]) : undefined;
-    if (!site || site.fields.Active === false || site.fields.POSChecklistApplies !== true) continue;
+    if (!site || site.fields.Active !== true || site.fields.POSChecklistApplies !== true) continue;
     const showroomId = site.fields.SourceShowroom?.[0];
     if (!showroomId) continue;
     targets.push({ name: u.fields.Name?.trim() || "there", email: u.fields.Email, siteName: site.fields.SiteName, showroomId });

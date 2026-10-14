@@ -2,12 +2,20 @@ import { redirect } from "next/navigation";
 import { requireRole } from "@/lib/auth";
 import { fetchPosShowrooms, fetchPOSQuestions, resolveShowroomForSite, type ShowroomForSite } from "@/lib/posWalkaround";
 import UploadTabs from "@/components/UploadTabs";
+import { getSiteChecks } from "@/lib/sites";
 
 export const dynamic = "force-dynamic";
 
 export default async function UploadPage() {
   const session = await requireRole(["Admin", "Marketing", "Store Manager"]);
   if (!session) redirect("/login");
+
+  // A Store Manager whose store doesn't do POS (Stores admin, Round 26 - e.g.
+  // Cookstown) goes to their H&S Check instead of a "doesn't apply" page.
+  if (session.role === "Store Manager") {
+    const checks = await getSiteChecks(session.siteId);
+    if (!checks.pos && checks.hs) redirect("/hs-check");
+  }
 
   const [showrooms, questions] = await Promise.all([
     session.role === "Store Manager" ? Promise.resolve([]) : fetchPosShowrooms(),

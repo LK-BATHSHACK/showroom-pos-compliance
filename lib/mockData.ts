@@ -321,7 +321,7 @@ const auditLineItems: Rec[] = [];
 // straight into Sites with no migration history, and Antrim Warehouse has
 // POSChecklistApplies=false so it never needs one; both are realistic
 // "POS doesn't apply here" cases for the in-tool form to handle gracefully.
-const siteSeed: { name: string; siteType: string; region: string; pos: boolean; hs: boolean; sourceShowroomName?: string }[] = [
+const siteSeed: { name: string; siteType: string; region: string; pos: boolean; hs: boolean; sourceShowroomName?: string; hsVersion?: string }[] = [
   { name: "Boucher", siteType: "Showroom", region: "NI", pos: true, hs: true, sourceShowroomName: "Boucher" },
   { name: "Shore Rd.", siteType: "Showroom", region: "NI", pos: true, hs: true, sourceShowroomName: "Shore Rd." },
   { name: "Dargan Showroom", siteType: "Showroom", region: "NI", pos: true, hs: true, sourceShowroomName: "Dargan" },
@@ -330,6 +330,9 @@ const siteSeed: { name: string; siteType: string; region: string; pos: boolean; 
   { name: "Cork Showroom", siteType: "Showroom", region: "ROI", pos: true, hs: true, sourceShowroomName: "Cork" },
   { name: "Dublin Showroom", siteType: "Showroom", region: "ROI", pos: true, hs: true, sourceShowroomName: "Dublin" },
   { name: "Cheadle", siteType: "Showroom", region: "GB", pos: true, hs: true },
+  // Round 26: a Clearance Outlet that does the WAREHOUSE version of the H&S
+  // check and no POS - mirrors the real Cookstown set-up.
+  { name: "Cookstown Clearance Outlet", siteType: "Clearance Outlet", region: "NI", pos: false, hs: true, hsVersion: "Warehouse" },
 ];
 
 const sites: Rec[] = siteSeed.map((s) => ({
@@ -342,6 +345,7 @@ const sites: Rec[] = siteSeed.map((s) => ({
     Active: true,
     POSChecklistApplies: s.pos,
     "H&SChecklistApplies": s.hs,
+    "H&SVersion": s.hsVersion || (s.siteType === "Warehouse" ? "Warehouse" : "Showroom"),
     SourceShowroom: s.sourceShowroomName ? [byName(s.sourceShowroomName).id] : [],
   },
 }));

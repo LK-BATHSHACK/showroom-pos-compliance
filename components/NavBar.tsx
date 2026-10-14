@@ -22,9 +22,17 @@ const LINKS: NavLink[] = [
   { href: "/consumables", label: "Consumables", roles: ["Admin", "Marketing", "Operations", "Store Manager"] },
   { href: "/admin/questions", label: "Questions", roles: ["Admin", "H&S"] },
   { href: "/admin/users", label: "Users & Access", roles: ["Admin"] },
+  // Stores admin (Round 26) - add stores and set which checks each one does.
+  { href: "/admin/stores", label: "Stores", roles: ["Admin"] },
 ];
 
-export default function NavBar({ session }: { session: SessionPayload | null }) {
+// A Store Manager only sees the checks their store is set up for on the
+// Stores page (Round 26) - e.g. Cookstown does H&S but not POS, so it gets
+// no "POS Check" link. `siteChecks` comes from the root layout; it's only
+// set for Store Managers.
+const CHECK_LINKS: Record<string, "pos" | "hs"> = { "/pos-check": "pos", "/hs-check": "hs" };
+
+export default function NavBar({ session, siteChecks }: { session: SessionPayload | null; siteChecks?: { pos: boolean; hs: boolean } | null }) {
   const pathname = usePathname();
   const router = useRouter();
 
@@ -36,7 +44,10 @@ export default function NavBar({ session }: { session: SessionPayload | null }) 
 
   if (!session) return null; // login page renders without the nav
 
-  const links = LINKS.filter((l) => l.roles.includes(session.role));
+  const links = LINKS.filter((l) => l.roles.includes(session.role)).filter((l) => {
+    const check = CHECK_LINKS[l.href];
+    return !(check && session.role === "Store Manager" && siteChecks && !siteChecks[check]);
+  });
 
   return (
     <nav style={{ background: "#1D1C1D", padding: "0 16px", display: "flex", alignItems: "center", height: 56, overflowX: "auto" }}>

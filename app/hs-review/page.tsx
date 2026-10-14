@@ -129,7 +129,9 @@ export default async function HSReviewPage({
     return true;
   });
   const hsSiteOptions = sites
-    .filter((s) => (s.fields as any)["H&SChecklistApplies"] !== false)
+    // `=== true`: an unticked Airtable checkbox is absent, not false, so
+    // `!== false` let H&S-off stores through (Round 26).
+    .filter((s) => (s.fields as any)["H&SChecklistApplies"] === true && (s.fields as any).Active === true)
     .slice()
     .sort((a, b) => (a.fields.SiteName || "").localeCompare(b.fields.SiteName || ""));
 

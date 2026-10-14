@@ -58,7 +58,7 @@ export default async function DashboardPage() {
   const hsAnswerIds = new Set(hsAnswers.map((a) => a.id));
   const hsSubmissions = hsSubmissionRecords.filter((s) => s.fields.ChecklistTemplate?.includes(hsTemplate?.id || ""));
   const hsActions = actionRecords.filter((a) => (a.fields.SourceAnswer || []).some((aid) => hsAnswerIds.has(aid)));
-  const hsSites = siteRecords.filter((s) => s.fields.Active !== false && s.fields["H&SChecklistApplies"]);
+  const hsSites = siteRecords.filter((s) => s.fields.Active === true && s.fields["H&SChecklistApplies"] === true);
 
   const hsSiteScores = computeHSSiteScores(
     hsSites.map((s) => ({ id: s.id, name: s.fields.SiteName })),
