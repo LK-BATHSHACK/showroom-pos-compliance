@@ -7,6 +7,8 @@
 // without live credentials - it is never active unless that env var is
 // explicitly set, so production/deployed behaviour is unchanged.
 
+import { unstable_cache, revalidateTag } from "next/cache";
+
 const PREVIEW_MODE = process.env.PREVIEW_MODE === "1";
 
 const API_ROOT = "https://api.airtable.com/v0";
@@ -40,6 +42,85 @@ function tableUrl(table: string) {
   return `${API_ROOT}/${baseId()}/${encodeURIComponent(table)}`;
 }
 
+// ---------------------------------------------------------------------------
+// Read caching (added 20 Oct 2026)
+//
+// The site went down on 20 Oct 2026 because the Airtable workspace ran out of
+// monthly API calls - every page load was a fresh set of Airtable requests.
+// Reads now go through Next's Data Cache (persistent across Vercel instances),
+// so the same list/record is fetched from Airtable at most once per TTL:
+//   - reference tables (sites, questions, catalogue...): 5 minutes
+//   - activity tables (submissions, actions, requests...): 1 minute
+//   - Users: never cached (always fresh for login/permissions, and keeps
+//     password hashes out of the cache)
+// Any write through this file (create/update/delete/upload) clears the whole
+// cache straight away, so changes made IN the app show immediately. Only edits
+// made directly in Airtable can take up to the TTL to appear.
+// Bonus: once an entry exists, a refresh that fails (e.g. Airtable down or rate
+// limited) keeps serving the last good data instead of crashing the page.
+// ---------------------------------------------------------------------------
+
+const CACHE_TAG_ALL = "airtable";
+const REFERENCE_TTL_SECONDS = 300;
+const ACTIVITY_TTL_SECONDS = 60;
+
+// Tables that change rarely and are read on almost every page.
+const REFERENCE_TABLES = new Set<string>([
+  "Settings",
+  "Showrooms",
+  "POS Master Catalogue",
+  "Sites",
+  "Checklist Templates",
+  "Template Questions",
+  "Rosters",
+  "Consumable Items",
+]);
+
+// Never cached - see note above.
+const UNCACHED_TABLES = new Set<string>(["Users"]);
+
+function cacheTtlFor(table: string): number | null {
+  if (UNCACHED_TABLES.has(table)) return null;
+  return REFERENCE_TABLES.has(table) ? REFERENCE_TTL_SECONDS : ACTIVITY_TTL_SECONDS;
+}
+
+/**
+ * Runs `load` through Next's Data Cache under `key`. Falls back to calling
+ * `load` directly when caching doesn't apply (uncached table) or isn't
+ * available (e.g. a script run outside Next with no incremental cache).
+ */
+async function cachedRead<R>(table: string, key: unknown[], load: () => Promise<R>): Promise<R> {
+  const ttl = cacheTtlFor(table);
+  if (ttl === null) return load();
+  const cached = unstable_cache(load, ["airtable-v1", table, JSON.stringify(key)], {
+    revalidate: ttl,
+    tags: [CACHE_TAG_ALL, `${CACHE_TAG_ALL}:${table}`],
+  });
+  try {
+    return await cached();
+  } catch (err) {
+    // Only bypass the cache for Next's "no incremental cache here" case -
+    // real Airtable errors must still surface.
+    if (err instanceof Error && err.message.includes("incrementalCache missing")) return load();
+    throw err;
+  }
+}
+
+/**
+ * Clears every cached Airtable read. Called after any successful write -
+ * a write to one table can change lookup/rollup fields in others, so the
+ * whole cache goes rather than just the one table. Writes are rare compared
+ * with reads, so this costs very little.
+ */
+function invalidateAirtableCache() {
+  if (PREVIEW_MODE) return;
+  try {
+    revalidateTag(CACHE_TAG_ALL);
+  } catch {
+    // Outside a Next request (e.g. a one-off script) there's no cache to clear.
+  }
+}
+
 export type AirtableRecord<T = Record<string, any>> = {
   id: string;
   createdTime?: string;
@@ -56,6 +137,13 @@ export async function listRecords<T = Record<string, any>>(
     return mockListRecords(table, opts) as Promise<AirtableRecord<T>[]>;
   }
 
+  return cachedRead(table, ["list", opts], () => fetchAllRecords<T>(table, opts));
+}
+
+async function fetchAllRecords<T>(
+  table: string,
+  opts: { filterByFormula?: string; sort?: { field: string; direction?: "asc" | "desc" }[]; maxRecords?: number }
+): Promise<AirtableRecord<T>[]> {
   const records: AirtableRecord<T>[] = [];
   let offset: string | undefined;
 
@@ -93,9 +181,11 @@ export async function getRecord<T = Record<string, any>>(table: string, id: stri
     return mockGetRecord(table, id) as Promise<AirtableRecord<T>>;
   }
 
-  const res = await fetch(`${tableUrl(table)}/${id}`, { headers: headers(), cache: "no-store" });
-  if (!res.ok) throw new Error(`Airtable get "${table}/${id}" failed (${res.status})`);
-  return res.json();
+  return cachedRead(table, ["get", id], async () => {
+    const res = await fetch(`${tableUrl(table)}/${id}`, { headers: headers(), cache: "no-store" });
+    if (!res.ok) throw new Error(`Airtable get "${table}/${id}" failed (${res.status})`);
+    return (await res.json()) as AirtableRecord<T>;
+  });
 }
 
 /** Create records, chunked into batches of 10 (Airtable's per-request limit). */
@@ -129,6 +219,7 @@ export async function createRecords<T = Record<string, any>>(
     const json = await res.json();
     created.push(...json.records);
   }
+  invalidateAirtableCache();
   return created;
 }
 
@@ -156,6 +247,7 @@ export async function updateRecords<T = Record<string, any>>(
     const json = await res.json();
     updated.push(...json.records);
   }
+  invalidateAirtableCache();
   return updated;
 }
 
@@ -180,6 +272,7 @@ export async function deleteRecords(table: string, ids: string[]): Promise<void>
       throw new Error(`Airtable delete "${table}" failed (${res.status}): ${body}`);
     }
   }
+  invalidateAirtableCache();
 }
 
 export type AttachmentUpload = { filename: string; contentType: string; base64: string };
@@ -208,6 +301,7 @@ export async function uploadAttachment(recordId: string, fieldIdOrName: string, 
     const body = await res.text();
     throw new Error(`Airtable uploadAttachment "${fieldIdOrName}" on ${recordId} failed (${res.status}): ${body}`);
   }
+  invalidateAirtableCache();
 }
 
 export const TABLES = {
