@@ -36,7 +36,7 @@ const LINKS: NavLink[] = [
 // set for Store Managers.
 const CHECK_LINKS: Record<string, "pos" | "hs"> = { "/pos-check": "pos", "/hs-check": "hs" };
 
-export default function NavBar({ session, siteChecks }: { session: SessionPayload | null; siteChecks?: { pos: boolean; hs: boolean } | null }) {
+export default function NavBar({ session, siteChecks, baysOn = true }: { session: SessionPayload | null; siteChecks?: { pos: boolean; hs: boolean } | null; baysOn?: boolean }) {
   const pathname = usePathname();
   const router = useRouter();
 
@@ -51,7 +51,9 @@ export default function NavBar({ session, siteChecks }: { session: SessionPayloa
   const links = LINKS.filter((l) => l.roles.includes(session.role)).filter((l) => {
     const check = CHECK_LINKS[l.href];
     return !(check && session.role === "Store Manager" && siteChecks && !siteChecks[check]);
-  });
+  })
+  // Round 30: bay links stay hidden until the bay register's database is connected.
+  .filter((l) => baysOn || !l.href.startsWith("/bays"));
 
   // The most specific link wins, so "/bays/desk" doesn't also light up "/bays".
   // Bay pages live under /bay/<code> too (the QR label route), which count as "Bays".

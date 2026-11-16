@@ -22,6 +22,11 @@ export type Query = {
   limit?: number;
 };
 
+/** True when the bay register can reach its database (Supabase env vars set, or preview mode). */
+export function bayDbConfigured(): boolean {
+  return PREVIEW_MODE || (!!process.env.SUPABASE_URL && !!process.env.SUPABASE_SERVICE_ROLE_KEY);
+}
+
 function cfg() {
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;

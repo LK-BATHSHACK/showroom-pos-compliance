@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import NavBar from "@/components/NavBar";
 import { getSession } from "@/lib/auth";
 import { getSiteChecks } from "@/lib/sites";
+import { bayDbConfigured } from "@/lib/bays/db";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -38,7 +39,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet" />
       </head>
       <body style={{ margin: 0, fontFamily: FONT_STACK, background: "#F7F7F8", color: "#1D1C1D" }}>
-        <NavBar session={session} siteChecks={siteChecks} />
+        <NavBar session={session} siteChecks={siteChecks} baysOn={bayDbConfigured()} />
         <main style={{ maxWidth: 1200, margin: "0 auto", padding: "24px 16px" }}>{children}</main>
       </body>
     </html>
