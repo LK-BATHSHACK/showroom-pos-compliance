@@ -17,7 +17,9 @@ type UserRow = {
 
 type SiteOption = { id: string; name: string };
 
-const ROLES = ["Admin", "Marketing", "H&S", "Store Manager", "Operations"];
+const ROLES = ["Admin", "Marketing", "H&S", "Store Manager", "Store Staff", "Layout Lead", "Operations"];
+// Roles locked to one store, so they need a Site (Store Staff = shared read-only store login, Round 28).
+const needsSite = (r: string) => r === "Store Manager" || r === "Store Staff";
 
 export default function UsersAdmin() {
   const [users, setUsers] = useState<UserRow[]>([]);
@@ -57,8 +59,8 @@ export default function UsersAdmin() {
     e.preventDefault();
     setError("");
     setNotice("");
-    if (form.role === "Store Manager" && !form.siteId) {
-      setError("Pick a Site for a Store Manager account.");
+    if (needsSite(form.role) && !form.siteId) {
+      setError(`Pick a Site for a ${form.role} account.`);
       return;
     }
     setCreating(true);
@@ -123,8 +125,8 @@ export default function UsersAdmin() {
   }
 
   async function saveEdit(u: UserRow) {
-    if (editRole === "Store Manager" && !editSiteId) {
-      setRowError("Pick a Site for a Store Manager account.");
+    if (needsSite(editRole) && !editSiteId) {
+      setRowError(`Pick a Site for a ${editRole} account.`);
       return;
     }
     setRowError("");
@@ -132,7 +134,7 @@ export default function UsersAdmin() {
     const res = await fetch("/api/admin/users", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: u.id, role: editRole, siteId: editRole === "Store Manager" ? editSiteId : "" }),
+      body: JSON.stringify({ id: u.id, role: editRole, siteId: needsSite(editRole) ? editSiteId : "" }),
     });
     setSaving(false);
     if (!res.ok) {
@@ -177,7 +179,7 @@ export default function UsersAdmin() {
               ))}
             </select>
           </div>
-          {form.role === "Store Manager" && (
+          {needsSite(form.role) && (
             <div>
               <label style={{ display: "block", fontSize: 12, color: "#6E6E6E", marginBottom: 4 }}>Site</label>
               <select value={form.siteId} onChange={(e) => setForm({ ...form, siteId: e.target.value })} style={inputStyle}>
@@ -242,7 +244,7 @@ export default function UsersAdmin() {
                     </td>
                     <td>
                       {isEditing ? (
-                        editRole === "Store Manager" ? (
+                        needsSite(editRole) ? (
                           <select
                             value={editSiteId}
                             onChange={(e) => setEditSiteId(e.target.value)}

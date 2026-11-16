@@ -24,6 +24,10 @@ export function homeForRole(role: UserRole): string {
       return "/hs-review";
     case "Operations":
       return "/consumables";
+    case "Store Staff":
+      return "/bays";
+    case "Layout Lead":
+      return "/bays/desk";
     default:
       return "/dashboard";
   }

@@ -40,14 +40,17 @@ const MAX_AGE_MS = 1000 * 60 * 60 * 24 * 30; // 30 days
 
 // "Operations" added 10 Sep 2026 for the Consumables Request feature (Chris
 // Agnew) - sees/manages the Consumables dashboard only, nothing else.
-export type UserRole = "Admin" | "Marketing" | "H&S" | "Store Manager" | "Operations";
+// "Layout Lead" (Ryan - owns showroom layouts and the bay register) and
+// "Store Staff" (one shared read-only login per store) added 13 Nov 2026 for
+// the bay register (Round 28).
+export type UserRole = "Admin" | "Marketing" | "H&S" | "Store Manager" | "Operations" | "Layout Lead" | "Store Staff";
 
 export type SessionPayload = {
   uid: string; // Users table record id
   name: string;
   email: string;
   role: UserRole;
-  siteId: string | null; // set for Store Manager; null otherwise
+  siteId: string | null; // set for Store Manager / Store Staff; null otherwise
   siteName: string | null;
 };
 

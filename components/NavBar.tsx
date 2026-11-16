@@ -20,6 +20,10 @@ const LINKS: NavLink[] = [
   // Consumables added 10 Sep 2026 - Store Manager submits requests; Admin/
   // Marketing/Operations (Chris Agnew) see the cross-store dashboard.
   { href: "/consumables", label: "Consumables", roles: ["Admin", "Marketing", "Operations", "Store Manager"] },
+  // Bay register (Round 28). "Bay desk" is Ryan's queue: approvals,
+  // differences found on checks, overdue installs.
+  { href: "/bays/desk", label: "Bay desk", roles: ["Admin", "Layout Lead"] },
+  { href: "/bays", label: "Bays", roles: ["Admin", "Marketing", "Layout Lead", "Store Manager", "Store Staff"] },
   { href: "/admin/questions", label: "Questions", roles: ["Admin", "H&S"] },
   { href: "/admin/users", label: "Users & Access", roles: ["Admin"] },
   // Stores admin (Round 26) - add stores and set which checks each one does.
@@ -49,6 +53,14 @@ export default function NavBar({ session, siteChecks }: { session: SessionPayloa
     return !(check && session.role === "Store Manager" && siteChecks && !siteChecks[check]);
   });
 
+  // The most specific link wins, so "/bays/desk" doesn't also light up "/bays".
+  // Bay pages live under /bay/<code> too (the QR label route), which count as "Bays".
+  const path = pathname?.startsWith("/bay/") ? "/bays" + pathname.slice(4) : pathname || "";
+  const activeHref = links
+    .map((l) => l.href)
+    .filter((h) => path === h || path.startsWith(h + "/"))
+    .sort((a, b) => b.length - a.length)[0];
+
   return (
     <nav style={{ background: "#1D1C1D", padding: "0 16px", display: "flex", alignItems: "center", height: 56, overflowX: "auto" }}>
       {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -64,11 +76,11 @@ export default function NavBar({ session, siteChecks }: { session: SessionPayloa
             key={l.href}
             href={l.href}
             style={{
-              color: pathname?.startsWith(l.href) ? "#fff" : "#B3B3B3",
+              color: activeHref === l.href ? "#fff" : "#B3B3B3",
               textDecoration: "none",
               fontSize: 14,
-              fontWeight: pathname?.startsWith(l.href) ? 600 : 400,
-              borderBottom: pathname?.startsWith(l.href) ? "2px solid #E6017E" : "2px solid transparent",
+              fontWeight: activeHref === l.href ? 600 : 400,
+              borderBottom: activeHref === l.href ? "2px solid #E6017E" : "2px solid transparent",
               paddingBottom: 4,
               whiteSpace: "nowrap",
               flexShrink: 0,

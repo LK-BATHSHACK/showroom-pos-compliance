@@ -1,0 +1,17 @@
+# dependencies and build output
+/node_modules/
+/.next/
+/out/
+*.tsbuildinfo
+
+# secrets
+.env*
+!.env.example
+
+# local exports and downloads - can contain customer data, never commit
+/Claude outputs/
+/exports/
+*.zip
+*.csv
+*.xlsx
+*.xls

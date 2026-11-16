@@ -552,6 +552,9 @@ const users: Rec[] = [
   // Chris Agnew's real account is created the normal way via Users & Access
   // once deployed; this is just the PREVIEW_MODE stand-in.
   { id: nextId("usr"), createdTime: "2026-09-10T09:00:00.000Z", fields: { Name: "Preview Operations", Email: "preview.operations@bathshack.com", PasswordHash: PREVIEW_PASSWORD_HASH, Role: "Operations", Active: true, MustChangePassword: false } },
+  // Bay register roles (Round 28) - preview stand-ins only.
+  { id: nextId("usr"), createdTime: "2026-11-13T09:00:00.000Z", fields: { Name: "Preview Layout Lead", Email: "preview.layoutlead@bathshack.com", PasswordHash: PREVIEW_PASSWORD_HASH, Role: "Layout Lead", Active: true, MustChangePassword: false } },
+  { id: nextId("usr"), createdTime: "2026-11-13T09:00:00.000Z", fields: { Name: "Boucher Staff (preview)", Email: "preview.staff@bathshack.com", PasswordHash: PREVIEW_PASSWORD_HASH, Role: "Store Staff", Site: [siteByName("Boucher").id], Active: true, MustChangePassword: false } },
 ];
 
 // One real Submission+Answer pair from "last month" (2026-08), so the

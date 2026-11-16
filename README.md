@@ -256,3 +256,30 @@ edit the `SettingValue` cell there to change them, no redeploy needed.
   day, that day's reminder is silently missed rather than catching up the
   next day. Worth revisiting once this is running for real, a small
   "LastReminderSent" field per showroom would make it more robust.
+
+## Bay register (Round 28, 13 Nov 2026)
+
+What's on display in every showroom bay, kept up to date by the people doing
+the work. Full design: the "Showroom Bay Management System - Specification"
+doc in the Team Planning project.
+
+- **Pages:** `/bays` (store's bays + to-do list), `/bay/<CODE>` (one bay -
+  the page each bay label's QR code opens), `/bay/<CODE>/check`,
+  `/bay/<CODE>/change`, `/bays/changes/<id>` (install / approve),
+  `/bays/desk` (Ryan's queue), `/bays/locator` (find a product).
+- **Roles:** new `Layout Lead` (Ryan) and `Store Staff` (one shared
+  read-only login per store, needs a Site). Rules in `lib/bays/access.ts`.
+- **Data:** Supabase Postgres + private Storage bucket, not Airtable (too
+  many rows and API calls for the Airtable plan). Stores and users still come
+  from Airtable. Schema: `supabase/bays-schema.sql` - run once in the
+  Supabase SQL editor. RLS is on with no policies; the app uses the
+  service-role key server-side only.
+- **Env vars (Vercel):** `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`.
+  Never commit them.
+- **Preview:** `PREVIEW_MODE=1` seeds made-up DEMO- products and two stores
+  (Boucher, Dublin) in memory. Extra preview logins: 
+  `preview.layoutlead@bathshack.com`, `preview.staff@bathshack.com`
+  (password `Preview123!`, preview only).
+- **Not built yet:** Acumatica product/price + Bay Quotes sync (waiting on
+  Chris), pricing/bay sheet PDFs, reminder/escalation emails and Lorraine's
+  Monday summary, bulk import of existing bay sheets, Shopify.

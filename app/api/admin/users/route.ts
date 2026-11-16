@@ -5,7 +5,7 @@ import { listRecords, createRecords, updateRecords, deleteRecords, TABLES } from
 type UserFields = {
   Name: string;
   Email: string;
-  Role: "Admin" | "Marketing" | "H&S" | "Store Manager" | "Operations";
+  Role: "Admin" | "Marketing" | "H&S" | "Store Manager" | "Operations" | "Layout Lead" | "Store Staff";
   Site?: string[];
   Active?: boolean;
   MustChangePassword?: boolean;
@@ -51,11 +51,11 @@ export async function POST(req: NextRequest) {
   if (!name || !email || !role) {
     return NextResponse.json({ error: "Name, email and role are required." }, { status: 400 });
   }
-  if (!["Admin", "Marketing", "H&S", "Store Manager", "Operations"].includes(role)) {
+  if (!["Admin", "Marketing", "H&S", "Store Manager", "Operations", "Layout Lead", "Store Staff"].includes(role)) {
     return NextResponse.json({ error: "Invalid role." }, { status: 400 });
   }
-  if (role === "Store Manager" && !siteId) {
-    return NextResponse.json({ error: "Store Manager accounts need a Site." }, { status: 400 });
+  if ((role === "Store Manager" || role === "Store Staff") && !siteId) {
+    return NextResponse.json({ error: `${role} accounts need a Site.` }, { status: 400 });
   }
 
   const existing = await listRecords<UserFields>(TABLES.USERS);
@@ -88,13 +88,13 @@ export async function PATCH(req: NextRequest) {
 
   const { id, role, siteId, active, resetPassword } = await req.json();
   if (!id) return NextResponse.json({ error: "Missing id." }, { status: 400 });
-  if (role && !["Admin", "Marketing", "H&S", "Store Manager", "Operations"].includes(role)) {
+  if (role && !["Admin", "Marketing", "H&S", "Store Manager", "Operations", "Layout Lead", "Store Staff"].includes(role)) {
     return NextResponse.json({ error: "Invalid role." }, { status: 400 });
   }
   // Same rule as creating a new account - a Store Manager without a Site
   // can't be locked to anything, which breaks the whole point of the role.
-  if (role === "Store Manager" && !siteId) {
-    return NextResponse.json({ error: "Store Manager accounts need a Site." }, { status: 400 });
+  if ((role === "Store Manager" || role === "Store Staff") && !siteId) {
+    return NextResponse.json({ error: `${role} accounts need a Site.` }, { status: 400 });
   }
 
   // Stop an Admin disabling their own only-active account and locking
